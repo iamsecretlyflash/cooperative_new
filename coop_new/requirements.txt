@@ -1,0 +1,14 @@
+appdirs
+fire
+black
+black[jupyter]
+gradio
+bitsandbytes
+evaluate
+tensorboardX
+accelerate
+sentencepiece
+scipy
+scikit-learn
+datasets
+wandb
