@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """PyTorch SuperPoint model."""
-
 from dataclasses import dataclass
 from typing import Optional, Tuple, Union
 
@@ -39,6 +38,8 @@ logger = logging.get_logger(__name__)
 _CONFIG_FOR_DOC = "SuperPointConfig"
 
 _CHECKPOINT_FOR_DOC = "magic-leap-community/superpoint"
+
+SUPERPOINT_PRETRAINED_MODEL_ARCHIVE_LIST = ["magic-leap-community/superpoint"]
 
 
 def remove_keypoints_from_borders(
@@ -78,7 +79,7 @@ def simple_nms(scores: torch.Tensor, nms_radius: int) -> torch.Tensor:
 
 
 @dataclass
-class SuperPointKeypointDescriptionOutput(ModelOutput):
+class ImagePointDescriptionOutput(ModelOutput):
     """
     Base class for outputs of image point description models. Due to the nature of keypoint detection, the number of
     keypoints is not fixed and can vary from image to image, which makes batching non-trivial. In the batch of images,
@@ -87,8 +88,8 @@ class SuperPointKeypointDescriptionOutput(ModelOutput):
     and which are padding.
 
     Args:
-        loss (`torch.FloatTensor` of shape `(1,)`, *optional*):
-            Loss computed during training.
+        last_hidden_state (`torch.FloatTensor` of shape `(batch_size, sequence_length, hidden_size)`):
+            Sequence of hidden-states at the output of the last layer of the decoder of the model.
         keypoints (`torch.FloatTensor` of shape `(batch_size, num_keypoints, 2)`):
             Relative (x, y) coordinates of predicted keypoints in a given image.
         scores (`torch.FloatTensor` of shape `(batch_size, num_keypoints)`):
@@ -104,7 +105,7 @@ class SuperPointKeypointDescriptionOutput(ModelOutput):
             (also called feature maps) of the model at the output of each stage.
     """
 
-    loss: Optional[torch.FloatTensor] = None
+    last_hidden_state: torch.FloatTensor = None
     keypoints: Optional[torch.IntTensor] = None
     scores: Optional[torch.FloatTensor] = None
     descriptors: Optional[torch.FloatTensor] = None
@@ -413,11 +414,11 @@ class SuperPointForKeypointDetection(SuperPointPreTrainedModel):
     @add_start_docstrings_to_model_forward(SUPERPOINT_INPUTS_DOCSTRING)
     def forward(
         self,
-        pixel_values: torch.FloatTensor,
+        pixel_values: torch.FloatTensor = None,
         labels: Optional[torch.LongTensor] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-    ) -> Union[Tuple, SuperPointKeypointDescriptionOutput]:
+    ) -> Union[Tuple, ImagePointDescriptionOutput]:
         """
         Examples:
 
@@ -436,14 +437,19 @@ class SuperPointForKeypointDetection(SuperPointPreTrainedModel):
         >>> inputs = processor(image, return_tensors="pt")
         >>> outputs = model(**inputs)
         ```"""
-        loss = None
+
         if labels is not None:
-            raise ValueError("SuperPoint does not support training for now.")
+            raise ValueError(
+                f"SuperPoint is not trainable, no labels should be provided.Therefore, labels should be None but were {type(labels)}"
+            )
 
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
         )
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+
+        if pixel_values is None:
+            raise ValueError("You have to specify pixel_values")
 
         pixel_values = self.extract_one_channel_pixel_values(pixel_values)
 
@@ -487,10 +493,12 @@ class SuperPointForKeypointDetection(SuperPointPreTrainedModel):
 
         hidden_states = encoder_outputs[1] if output_hidden_states else None
         if not return_dict:
-            return tuple(v for v in [loss, keypoints, scores, descriptors, mask, hidden_states] if v is not None)
+            return tuple(
+                v for v in [last_hidden_state, keypoints, scores, descriptors, mask, hidden_states] if v is not None
+            )
 
-        return SuperPointKeypointDescriptionOutput(
-            loss=loss,
+        return ImagePointDescriptionOutput(
+            last_hidden_state=last_hidden_state,
             keypoints=keypoints,
             scores=scores,
             descriptors=descriptors,

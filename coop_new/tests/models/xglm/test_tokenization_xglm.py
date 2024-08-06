@@ -150,7 +150,7 @@ class XGLMTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
 
     def test_rust_and_python_full_tokenizers(self):
         if not self.test_rust_tokenizer:
-            self.skipTest(reason="test_rust_tokenizer is set to False")
+            return
 
         tokenizer = self.get_tokenizer()
         rust_tokenizer = self.get_rust_tokenizer()

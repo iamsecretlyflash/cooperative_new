@@ -16,6 +16,7 @@
 RetriBERT model
 """
 
+
 import math
 from typing import Optional
 
@@ -30,6 +31,9 @@ from .configuration_retribert import RetriBertConfig
 
 
 logger = logging.get_logger(__name__)
+
+
+from .._archive_maps import RETRIBERT_PRETRAINED_MODEL_ARCHIVE_LIST  # noqa: F401, E402
 
 
 # INTERFACE FOR ENCODER AND TASK SPECIFIC MODEL #

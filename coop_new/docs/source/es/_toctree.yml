@@ -92,8 +92,6 @@
     title: Lo que 🤗 Transformers puede hacer
   - local: tasks_explained
     title: Como los 🤗 Transformers resuelven tareas
-  - local: tokenizer_summary
-    title: Descripción general de los tokenizadores
   - local: attention
     title: Mecanismos de atención
   - local: pad_truncation
@@ -102,8 +100,4 @@
     title: BERTología
   - local: perplexity
     title: Perplejidad de los modelos de longitud fija
-  - local: pipeline_webserver
-    title: Flujo de trabajo para la inferencia de los servidores web
-  - local: model_memory_anatomy
-    title: Anatomía del entrenamiento de los modelos
   title: Guías conceptuales

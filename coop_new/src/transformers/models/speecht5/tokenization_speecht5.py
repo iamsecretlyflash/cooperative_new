@@ -14,6 +14,7 @@
 # limitations under the License.
 """Tokenization class for SpeechT5."""
 
+
 import os
 from shutil import copyfile
 from typing import Any, Dict, List, Optional, Tuple

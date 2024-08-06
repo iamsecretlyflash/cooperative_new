@@ -93,7 +93,6 @@ class MLukeTokenizerTest(TokenizerTesterMixin, unittest.TestCase):
         ids = tokenizer.encode(txt, add_special_tokens=False)
         return txt, ids
 
-    @unittest.skip
     def test_pretokenized_inputs(self):
         pass
 
@@ -151,7 +150,7 @@ class MLukeTokenizerTest(TokenizerTesterMixin, unittest.TestCase):
         with self.assertRaises(ValueError):
             tokenizer(sentence, entities=tuple(entities), entity_spans=spans)
 
-        with self.assertRaises(TypeError):
+        with self.assertRaises(ValueError):
             tokenizer(sentence, entities=entities, entity_spans=tuple(spans))
 
         with self.assertRaises(ValueError):

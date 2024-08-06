@@ -177,9 +177,9 @@ class Qwen2Tokenizer(PreTrainedTokenizer):
         self.byte_decoder = {v: k for k, v in self.byte_encoder.items()}
         bpe_merges = []
         with open(merges_file, encoding="utf-8") as merges_handle:
-            for i, line in enumerate(merges_handle):
+            for line in merges_handle:
                 line = line.strip()
-                if (i == 0 and line.startswith("#version:")) or not line:
+                if not line or line.startswith("#"):
                     continue
                 bpe_merges.append(tuple(line.split()))
         self.bpe_ranks = dict(zip(bpe_merges, range(len(bpe_merges))))

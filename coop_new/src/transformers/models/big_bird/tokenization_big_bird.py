@@ -14,6 +14,7 @@
 # limitations under the License.
 """Tokenization classes for BigBird."""
 
+
 import os
 import re
 from shutil import copyfile

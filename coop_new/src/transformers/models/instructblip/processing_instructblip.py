@@ -40,16 +40,15 @@ class InstructBlipProcessor(ProcessorMixin):
             An instance of [`BlipImageProcessor`]. The image processor is a required input.
         tokenizer (`AutoTokenizer`):
             An instance of ['PreTrainedTokenizer`]. The tokenizer is a required input.
-        qformer_tokenizer (`AutoTokenizer`, *optional*):
+        qformer_tokenizer (`AutoTokenizer`):
             An instance of ['PreTrainedTokenizer`]. The Q-Former tokenizer is a required input.
     """
 
     attributes = ["image_processor", "tokenizer"]
-    valid_kwargs = []
     image_processor_class = "BlipImageProcessor"
     tokenizer_class = "AutoTokenizer"
 
-    def __init__(self, image_processor, tokenizer, qformer_tokenizer=None, **kwargs):
+    def __init__(self, image_processor, tokenizer, qformer_tokenizer):
         super().__init__(image_processor, tokenizer)
 
         # add QFormer tokenizer
@@ -168,11 +167,7 @@ class InstructBlipProcessor(ProcessorMixin):
     # overwrite to load the Q-Former tokenizer from a separate folder
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path, **kwargs):
-        processor = super().from_pretrained(pretrained_model_name_or_path, **kwargs)
-
-        # if return_unused_kwargs a tuple is returned where the second element is 'unused_kwargs'
-        if isinstance(processor, tuple):
-            processor = processor[0]
         qformer_tokenizer = AutoTokenizer.from_pretrained(pretrained_model_name_or_path, subfolder="qformer_tokenizer")
-        processor.qformer_tokenizer = qformer_tokenizer
-        return processor
+        args = cls._get_arguments_from_pretrained(pretrained_model_name_or_path, **kwargs)
+        args.append(qformer_tokenizer)
+        return cls(*args)

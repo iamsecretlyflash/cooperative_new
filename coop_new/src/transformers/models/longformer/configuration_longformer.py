@@ -12,8 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Longformer configuration"""
-
+""" Longformer configuration"""
 from collections import OrderedDict
 from typing import TYPE_CHECKING, Any, List, Mapping, Optional, Union
 
@@ -28,6 +27,9 @@ if TYPE_CHECKING:
 
 
 logger = logging.get_logger(__name__)
+
+
+from ..deprecated._archive_maps import LONGFORMER_PRETRAINED_CONFIG_ARCHIVE_MAP  # noqa: F401, E402
 
 
 class LongformerConfig(PretrainedConfig):

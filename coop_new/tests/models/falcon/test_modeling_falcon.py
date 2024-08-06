@@ -12,7 +12,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Testing suite for the PyTorch Falcon model."""
+""" Testing suite for the PyTorch Falcon model. """
+
 
 import tempfile
 import unittest
@@ -26,14 +27,7 @@ from transformers import (
     is_torch_available,
     set_seed,
 )
-from transformers.testing_utils import (
-    is_flaky,
-    require_bitsandbytes,
-    require_torch,
-    require_torch_sdpa,
-    slow,
-    torch_device,
-)
+from transformers.testing_utils import require_bitsandbytes, require_torch, require_torch_sdpa, slow, torch_device
 
 from ...generation.test_utils import GenerationTesterMixin
 from ...test_configuration_common import ConfigTester
@@ -381,7 +375,7 @@ class FalconModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMix
 
             # If it doesn't support cache, pass the test
             if not hasattr(config, "use_cache"):
-                self.skipTest(reason="Model does not support cache")
+                return
 
             model = model_class(config).to(torch_device)
             if "use_cache" not in inputs:
@@ -390,7 +384,7 @@ class FalconModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMix
 
             # If "past_key_values" is not returned, pass the test (e.g. RWKV uses a different cache name and format)
             if "past_key_values" not in outputs:
-                self.skipTest(reason="Model does not return past_key_values")
+                return
 
             num_hidden_layers = (
                 getattr(config, "decoder_layers", None)
@@ -509,8 +503,6 @@ class FalconModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMix
             torch.testing.assert_close(ntk_sin_long, original_sin_long)
         self.assertTrue((ntk_scaling_rope.inv_freq <= original_rope.inv_freq).all())
 
-    # TODO: @Fxmarty
-    @is_flaky(max_attempts=3, description="flaky on some models.")
     @require_torch_sdpa
     @slow
     def test_eager_matches_sdpa_generate(self):
@@ -602,25 +594,6 @@ class FalconLanguageGenerationTest(unittest.TestCase):
         self.assertEqual(output_str, EXPECTED_OUTPUT)
 
     @slow
-    @require_bitsandbytes
-    def test_lm_generate_falcon_11b(self):
-        tokenizer = AutoTokenizer.from_pretrained("tiiuae/falcon-11B", padding_side="left")
-        model = FalconForCausalLM.from_pretrained(
-            "tiiuae/falcon-11B", device_map={"": torch_device}, load_in_8bit=True
-        )
-        model.eval()
-        inputs = tokenizer(
-            "Two roads diverged in a yellow wood,", return_tensors="pt", return_token_type_ids=False
-        ).to(torch_device)
-
-        EXPECTED_OUTPUT = "Two roads diverged in a yellow wood,\nAnd sorry I could not travel both\n"
-
-        output_ids = model.generate(**inputs, do_sample=False, max_new_tokens=9)
-        output_str = tokenizer.batch_decode(output_ids)[0]
-
-        self.assertEqual(output_str, EXPECTED_OUTPUT)
-
-    @slow
     def test_lm_generation_big_models(self):
         # The big models are way too big for the CI, so we use tiny random models that resemble their
         # architectures but with much smaller and fewer layers
@@ -665,7 +638,7 @@ class FalconLanguageGenerationTest(unittest.TestCase):
         tokenizer.pad_token = tokenizer.eos_token
         model = AutoModelForCausalLM.from_pretrained(
             "tiiuae/falcon-7b",
-            device_map={"": torch_device},
+            device_map="auto",
             load_in_4bit=True,
         )
 
@@ -684,27 +657,3 @@ class FalconLanguageGenerationTest(unittest.TestCase):
         self.assertLess(unpadded_inputs.input_ids.shape[-1], padded_inputs.input_ids.shape[-1])  # left-padding exists
         self.assertEqual(unpadded_gen_text[0], expected_output)
         self.assertEqual(padded_gen_text[0], expected_output)
-
-    @slow
-    @require_torch_sdpa
-    def test_falcon_alibi_sdpa_matches_eager(self):
-        input_ids = torch.randint(0, 1000, (5, 20))
-
-        config = FalconConfig(
-            vocab_size=1000,
-            hidden_size=64,
-            num_hidden_layers=3,
-            num_attention_heads=4,
-            new_decoder_architecture=True,
-            alibi=True,
-        )
-
-        falcon = FalconForCausalLM(config)
-        falcon = falcon.eval()
-
-        with torch.no_grad():
-            # output_attentions=True dispatches to eager path
-            falcon_output_eager = falcon(input_ids, output_attentions=True)[0]
-            falcon_output_sdpa = falcon(input_ids)[0]
-
-        self.assertTrue(torch.allclose(falcon_output_eager, falcon_output_sdpa, atol=1e-3))

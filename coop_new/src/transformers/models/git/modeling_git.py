@@ -15,6 +15,7 @@
 # limitations under the License.
 """PyTorch GIT model."""
 
+
 import math
 from dataclasses import dataclass
 from typing import List, Optional, Tuple, Union
@@ -43,6 +44,9 @@ logger = logging.get_logger(__name__)
 
 _CHECKPOINT_FOR_DOC = "microsoft/git-base"
 _CONFIG_FOR_DOC = "GitConfig"
+
+
+from ..deprecated._archive_maps import GIT_PRETRAINED_MODEL_ARCHIVE_LIST  # noqa: F401, E402
 
 
 @dataclass
@@ -263,18 +267,11 @@ class GitSelfOutput(nn.Module):
         return hidden_states
 
 
-GIT_SELF_ATTENTION_CLASSES = {
-    "eager": GitSelfAttention,
-}
-
-
 class GitAttention(nn.Module):
-    # Copied from transformers.models.bert.modeling_bert.BertAttention.__init__ with Bert->Git,BERT->GIT
+    # Copied from transformers.models.bert.modeling_bert.BertAttention.__init__ with Bert->Git
     def __init__(self, config, position_embedding_type=None):
         super().__init__()
-        self.self = GIT_SELF_ATTENTION_CLASSES[config._attn_implementation](
-            config, position_embedding_type=position_embedding_type
-        )
+        self.self = GitSelfAttention(config, position_embedding_type=position_embedding_type)
         self.output = GitSelfOutput(config)
         self.pruned_heads = set()
 
@@ -632,7 +629,7 @@ class GitVisionMLP(nn.Module):
         return hidden_states
 
 
-# Copied from transformers.models.clip.modeling_clip.CLIPAttention with CLIP->GitVision
+# Copied from transformers.models.clip.modeling_clip.CLIPAttention
 class GitVisionAttention(nn.Module):
     """Multi-headed attention from 'Attention Is All You Need' paper"""
 
@@ -664,7 +661,7 @@ class GitVisionAttention(nn.Module):
         attention_mask: Optional[torch.Tensor] = None,
         causal_attention_mask: Optional[torch.Tensor] = None,
         output_attentions: Optional[bool] = False,
-    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
         """Input shape: Batch x Time x Channel"""
 
         bsz, tgt_len, embed_dim = hidden_states.size()
@@ -737,7 +734,7 @@ class GitVisionAttention(nn.Module):
         return attn_output, attn_weights_reshaped
 
 
-# Copied from transformers.models.altclip.modeling_altclip.AltCLIPEncoderLayer with AltCLIP->GitVision
+# Copied from transformers.models.clip.modeling_clip.CLIPEncoderLayer with CLIP->GitVision
 class GitVisionEncoderLayer(nn.Module):
     def __init__(self, config: GitVisionConfig):
         super().__init__()
@@ -788,7 +785,7 @@ class GitVisionEncoderLayer(nn.Module):
         return outputs
 
 
-# Copied from transformers.models.altclip.modeling_altclip.AltCLIPEncoder with AltCLIP->GitVision, CLIPConfig
+# Copied from transformers.models.clip.modeling_clip.CLIPEncoder with CLIP->GitVision, CLIPConfig
 class GitVisionEncoder(nn.Module):
     """
     Transformer encoder consisting of `config.num_hidden_layers` self attention layers. Each layer is a
@@ -903,7 +900,7 @@ GIT_VISION_INPUTS_DOCSTRING = r"""
 
 
 class GitVisionTransformer(nn.Module):
-    # Copied from transformers.models.altclip.modeling_altclip.AltCLIPVisionTransformer.__init__ with AltCLIPEncoder->GitVisionEncoder, AltCLIP->Git
+    # Copied from transformers.models.clip.modeling_clip.CLIPVisionTransformer.__init__ with CLIPEncoder->GitVisionEncoder, CLIP->Git
     def __init__(self, config: GitVisionConfig):
         super().__init__()
         self.config = config

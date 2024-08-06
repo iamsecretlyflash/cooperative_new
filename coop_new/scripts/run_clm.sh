@@ -1,0 +1,47 @@
+WANDB_PROJECT='GPT-2-Wikitext' TF_CPP_MIN_LOG_LEVEL=2 TF_ENABLE_ONEDNN_OPTS=0 CUDA_VISIBLE_DEVICES=2 python examples/pytorch/language-modeling/run_clm.py \
+    --model_name_or_path openai-community/gpt2 \
+    --dataset_name wikitext \
+    --dataset_config_name wikitext-2-raw-v1 \
+    --per_device_train_batch_size 8 \
+    --per_device_eval_batch_size 8 \
+    --do_train \
+    --do_eval \
+    --output_dir /tmp/test-clm \
+    --overwrite_output_dir \
+    --expert_locations 'intermediate, output' \
+    --num_experts 8 \
+    --log_variance_init -100 \
+    --var_loss_scale 1e-6 \
+    --single_variance False \
+    --use_entropy True \
+    --freeze_base False \
+    --learning_rate 3e-4 \
+    --num_train_epochs 5 \
+    --evaluation_strategy steps --eval_steps 50  \
+    --save_strategy steps --save_steps 10000 \
+    --logging_steps 10 \
+    --report_to wandb
+
+WANDB_PROJECT='GPT-2-Wikitext' TF_CPP_MIN_LOG_LEVEL=2 TF_ENABLE_ONEDNN_OPTS=0 CUDA_VISIBLE_DEVICES=2 python examples/pytorch/language-modeling/run_clm.py \
+    --model_name_or_path openai-community/gpt2 \
+    --dataset_name wikitext \
+    --dataset_config_name wikitext-2-raw-v1 \
+    --per_device_train_batch_size 8 \
+    --per_device_eval_batch_size 8 \
+    --do_train \
+    --do_eval \
+    --output_dir /tmp/test-clm \
+    --overwrite_output_dir \
+    --expert_locations 'intermediate, output' \
+    --num_experts 8 \
+    --log_variance_init -100 \
+    --var_loss_scale 1e-6 \
+    --single_variance False \
+    --use_entropy False \
+    --freeze_base False \
+    --learning_rate 3e-4 \
+    --num_train_epochs 5 \
+    --evaluation_strategy steps --eval_steps 50  \
+    --save_strategy steps --save_steps 10000 \
+    --logging_steps 10 \
+    --report_to wandb

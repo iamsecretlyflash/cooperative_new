@@ -13,8 +13,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""BERT model configuration"""
-
+""" BERT model configuration"""
 from collections import OrderedDict
 from typing import Mapping
 
@@ -24,6 +23,50 @@ from ...utils import logging
 
 
 logger = logging.get_logger(__name__)
+
+BERT_PRETRAINED_CONFIG_ARCHIVE_MAP = {
+    "google-bert/bert-base-uncased": "https://huggingface.co/google-bert/bert-base-uncased/resolve/main/config.json",
+    "google-bert/bert-large-uncased": "https://huggingface.co/google-bert/bert-large-uncased/resolve/main/config.json",
+    "google-bert/bert-base-cased": "https://huggingface.co/google-bert/bert-base-cased/resolve/main/config.json",
+    "google-bert/bert-large-cased": "https://huggingface.co/google-bert/bert-large-cased/resolve/main/config.json",
+    "google-bert/bert-base-multilingual-uncased": "https://huggingface.co/google-bert/bert-base-multilingual-uncased/resolve/main/config.json",
+    "google-bert/bert-base-multilingual-cased": "https://huggingface.co/google-bert/bert-base-multilingual-cased/resolve/main/config.json",
+    "google-bert/bert-base-chinese": "https://huggingface.co/google-bert/bert-base-chinese/resolve/main/config.json",
+    "google-bert/bert-base-german-cased": "https://huggingface.co/google-bert/bert-base-german-cased/resolve/main/config.json",
+    "google-bert/bert-large-uncased-whole-word-masking": (
+        "https://huggingface.co/google-bert/bert-large-uncased-whole-word-masking/resolve/main/config.json"
+    ),
+    "google-bert/bert-large-cased-whole-word-masking": (
+        "https://huggingface.co/google-bert/bert-large-cased-whole-word-masking/resolve/main/config.json"
+    ),
+    "google-bert/bert-large-uncased-whole-word-masking-finetuned-squad": (
+        "https://huggingface.co/google-bert/bert-large-uncased-whole-word-masking-finetuned-squad/resolve/main/config.json"
+    ),
+    "google-bert/bert-large-cased-whole-word-masking-finetuned-squad": (
+        "https://huggingface.co/google-bert/bert-large-cased-whole-word-masking-finetuned-squad/resolve/main/config.json"
+    ),
+    "google-bert/bert-base-cased-finetuned-mrpc": "https://huggingface.co/google-bert/bert-base-cased-finetuned-mrpc/resolve/main/config.json",
+    "google-bert/bert-base-german-dbmdz-cased": "https://huggingface.co/google-bert/bert-base-german-dbmdz-cased/resolve/main/config.json",
+    "google-bert/bert-base-german-dbmdz-uncased": "https://huggingface.co/google-bert/bert-base-german-dbmdz-uncased/resolve/main/config.json",
+    "cl-tohoku/bert-base-japanese": "https://huggingface.co/cl-tohoku/bert-base-japanese/resolve/main/config.json",
+    "cl-tohoku/bert-base-japanese-whole-word-masking": (
+        "https://huggingface.co/cl-tohoku/bert-base-japanese-whole-word-masking/resolve/main/config.json"
+    ),
+    "cl-tohoku/bert-base-japanese-char": (
+        "https://huggingface.co/cl-tohoku/bert-base-japanese-char/resolve/main/config.json"
+    ),
+    "cl-tohoku/bert-base-japanese-char-whole-word-masking": (
+        "https://huggingface.co/cl-tohoku/bert-base-japanese-char-whole-word-masking/resolve/main/config.json"
+    ),
+    "TurkuNLP/bert-base-finnish-cased-v1": (
+        "https://huggingface.co/TurkuNLP/bert-base-finnish-cased-v1/resolve/main/config.json"
+    ),
+    "TurkuNLP/bert-base-finnish-uncased-v1": (
+        "https://huggingface.co/TurkuNLP/bert-base-finnish-uncased-v1/resolve/main/config.json"
+    ),
+    "wietsedv/bert-base-dutch-cased": "https://huggingface.co/wietsedv/bert-base-dutch-cased/resolve/main/config.json",
+    # See all BERT models at https://huggingface.co/models?filter=bert
+}
 
 
 class BertConfig(PretrainedConfig):
@@ -78,6 +121,10 @@ class BertConfig(PretrainedConfig):
             relevant if `config.is_decoder=True`.
         classifier_dropout (`float`, *optional*):
             The dropout ratio for the classification head.
+        expert_locations:
+            Place to add GMOE
+        experts_num:
+            Number of experts 
 
     Examples:
 
@@ -114,6 +161,17 @@ class BertConfig(PretrainedConfig):
         position_embedding_type="absolute",
         use_cache=True,
         classifier_dropout=None,
+        expert_locations = "query,key,value,attention_out,intermediate,output", #
+        num_experts = 4, #4
+        log_variance_init = -10,
+        single_variance = False,
+        var_loss_scale = 1e-6,
+        use_entropy = False,
+        freeze_base = True,
+        weight_normalization = 'Softmax',
+        expert_weight_init = -1,
+        inference_mixing_coeff = 1,
+        sample_period = 1,
         **kwargs,
     ):
         super().__init__(pad_token_id=pad_token_id, **kwargs)
@@ -133,7 +191,17 @@ class BertConfig(PretrainedConfig):
         self.position_embedding_type = position_embedding_type
         self.use_cache = use_cache
         self.classifier_dropout = classifier_dropout
-
+        self.expert_locations = expert_locations
+        self.num_experts = num_experts
+        self.log_variance_init = log_variance_init
+        self.single_variance = single_variance
+        self.var_loss_scale = var_loss_scale
+        self.use_entropy = use_entropy
+        self.freeze_base = freeze_base
+        self.weight_normalization = weight_normalization 
+        self.expert_weight_init = expert_weight_init
+        self.inference_mixing_coeff = inference_mixing_coeff
+        self.sample_period = sample_period 
 
 class BertOnnxConfig(OnnxConfig):
     @property

@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Testing suite for the PyTorch Chinese-CLIP model."""
+""" Testing suite for the PyTorch Chinese-CLIP model. """
 
 import inspect
 import os
@@ -388,11 +388,9 @@ class ChineseCLIPTextModelTest(ModelTesterMixin, unittest.TestCase):
         model = ChineseCLIPTextModel.from_pretrained(model_name)
         self.assertIsNotNone(model)
 
-    @unittest.skip
     def test_training(self):
         pass
 
-    @unittest.skip
     def test_training_gradient_checkpointing(self):
         pass
 
@@ -443,7 +441,7 @@ class ChineseCLIPVisionModelTest(ModelTesterMixin, unittest.TestCase):
     def test_inputs_embeds(self):
         pass
 
-    def test_model_get_set_embeddings(self):
+    def test_model_common_attributes(self):
         config, _ = self.model_tester.prepare_config_and_inputs_for_common()
 
         for model_class in self.all_model_classes:
@@ -468,11 +466,9 @@ class ChineseCLIPVisionModelTest(ModelTesterMixin, unittest.TestCase):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
         self.model_tester.create_and_check_model(*config_and_inputs)
 
-    @unittest.skip
     def test_training(self):
         pass
 
-    @unittest.skip
     def test_training_gradient_checkpointing(self):
         pass
 
@@ -593,7 +589,7 @@ class ChineseCLIPModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestC
         pass
 
     @unittest.skip(reason="ChineseCLIPModel does not have input/output embeddings")
-    def test_model_get_set_embeddings(self):
+    def test_model_common_attributes(self):
         pass
 
     # override as the `logit_scale` parameter initilization is different for CHINESE_CLIP
@@ -625,7 +621,7 @@ class ChineseCLIPModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestC
 
     def _create_and_check_torchscript(self, config, inputs_dict):
         if not self.test_torchscript:
-            self.skipTest(reason="test_torchscript is set to False")
+            return
 
         configs_no_init = _config_zero_init(config)  # To be sure we have no Nan
         configs_no_init.torchscript = True

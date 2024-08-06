@@ -78,8 +78,6 @@
     title: 如何将流水线添加到 🤗 Transformers？
   title: 贡献
 - sections:
-  - local: philosophy
-    title: Transformers的设计理念
   - local: task_summary
     title: 🤗Transformers能做什么
   - local: tokenizer_summary

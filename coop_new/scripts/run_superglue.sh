@@ -1,0 +1,16 @@
+TF_CPP_MIN_LOG_LEVEL=2 TF_ENABLE_ONEDNN_OPTS=0 CUDA_VISIBLE_DEVICES=2 python examples/text-classification/run_superglue.py \
+--model_name_or_path roberta-base \
+--task_name rte \
+--apply_sparseft --sparseft_type 2 \
+--sparseft_module query,key,value,intermediate,layer.output,attention.output \
+--do_train --do_eval --max_seq_length 256 \
+--per_device_train_batch_size 32 --learning_rate 1e-4 \
+--num_train_epochs 20 \
+--weight_decay 0 --budget 320000 --recovery_steps 0 \
+--evaluation_strategy steps --eval_steps 100 \
+--save_strategy steps --save_steps 10000 \
+--logging_steps 10 \
+--report_to wandb \
+--seed 6  \
+--output_dir ./output/roberta-base/rte \
+--overwrite_output_dir

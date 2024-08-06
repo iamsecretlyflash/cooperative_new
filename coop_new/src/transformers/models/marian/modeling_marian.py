@@ -14,6 +14,7 @@
 # limitations under the License.
 """PyTorch MarianMTModel model, ported from the Marian C++ repo."""
 
+
 import copy
 import math
 from typing import Dict, List, Optional, Tuple, Union
@@ -1342,13 +1343,7 @@ class MarianMTModel(MarianPreTrainedModel):
         if getattr(self.config, "is_encoder_decoder", False) and getattr(self.config, "tie_encoder_decoder", False):
             if hasattr(self, self.base_model_prefix):
                 self = getattr(self, self.base_model_prefix)
-            tied_weights = self._tie_encoder_decoder_weights(
-                self.encoder, self.decoder, self.base_model_prefix, "encoder"
-            )
-            # Setting a dynamic variable instead of `_tied_weights_keys` because it's a class
-            # attributed not an instance member, therefore modifying it will modify the entire class
-            # Leading to issues on subsequent calls by different tests or subsequent calls.
-            self._dynamic_tied_weights_keys = tied_weights
+            self._tie_encoder_decoder_weights(self.encoder, self.decoder, self.base_model_prefix)
 
         for module in self.modules():
             if hasattr(module, "_tie_weights"):

@@ -14,6 +14,7 @@
 # limitations under the License.
 """TF 2.0 TAPAS model."""
 
+
 from __future__ import annotations
 
 import enum
@@ -49,6 +50,7 @@ from ...utils import (
     is_tensorflow_probability_available,
     logging,
     replace_return_docstrings,
+    requires_backends,
 )
 from .configuration_tapas import TapasConfig
 
@@ -69,18 +71,12 @@ if is_tensorflow_probability_available():
             "It seems you have `tensorflow_probability` installed with the wrong tensorflow version. "
             "Please try to reinstall it following the instructions here: https://github.com/tensorflow/probability."
         )
-else:
-    try:
-        import tensorflow_probability as tfp
-
-        # On the first call, check whether a compatible version of TensorFlow is installed
-        # TensorFlow Probability depends on a recent stable release of TensorFlow
-        _ = tfp.distributions.Normal(loc=0.0, scale=1.0)
-    except ImportError:
-        pass
 
 _CONFIG_FOR_DOC = "TapasConfig"
 _CHECKPOINT_FOR_DOC = "google/tapas-base"
+
+
+from ..deprecated._archive_maps import TF_TAPAS_PRETRAINED_MODEL_ARCHIVE_LIST  # noqa: F401, E402
 
 
 EPSILON_ZERO_DIVISION = 1e-10
@@ -834,6 +830,7 @@ class TFTapasMainLayer(keras.layers.Layer):
     config_class = TapasConfig
 
     def __init__(self, config: TapasConfig, add_pooling_layer: bool = True, **kwargs):
+        requires_backends(self, "tensorflow_probability")
         super().__init__(**kwargs)
 
         self.config = config
@@ -1830,7 +1827,7 @@ class AverageApproximationFunction(str, enum.Enum):
 # Beginning of everything related to segmented tensors
 
 
-class IndexMap:
+class IndexMap(object):
     """Index grouping entries within a tensor."""
 
     def __init__(self, indices, num_segments, batch_dims=0):

@@ -175,7 +175,6 @@ class FlavaImageProcessingTest(ImageProcessingTestMixin, unittest.TestCase):
     maxDiff = None
 
     def setUp(self):
-        super().setUp()
         self.image_processor_tester = FlavaImageProcessingTester(self)
 
     @property

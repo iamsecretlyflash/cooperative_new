@@ -13,7 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Image processor class for SAM."""
-
 import math
 from copy import deepcopy
 from itertools import product

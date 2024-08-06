@@ -12,7 +12,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Testing suite for the PyTorch MRA model."""
+""" Testing suite for the PyTorch MRA model. """
+
 
 import unittest
 
@@ -376,9 +377,7 @@ class MraModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
     def test_training_gradient_checkpointing_use_reentrant_false(self):
         pass
 
-    @unittest.skip(
-        reason="Model has `nan` in hidden_states, see https://github.com/huggingface/transformers/issues/29373."
-    )
+    @unittest.skip("Model has `nan` in hidden_states, see https://github.com/huggingface/transformers/issues/29373.")
     def test_batching_equivalence(self):
         pass
 

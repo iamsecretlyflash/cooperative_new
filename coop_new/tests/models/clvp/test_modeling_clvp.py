@@ -12,7 +12,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Testing suite for the PyTorch Clvp model."""
+""" Testing suite for the PyTorch Clvp model. """
+
 
 import gc
 import tempfile
@@ -489,7 +490,7 @@ class ClvpModelForConditionalGenerationTest(ModelTesterMixin, unittest.TestCase)
         pass
 
     @unittest.skip(reason="ClvpModelForConditionalGeneration does not have get_input_embeddings")
-    def test_model_get_set_embeddings(self):
+    def test_model_common_attributes(self):
         pass
 
     # override as the `logit_scale` parameter initilization is different for Clvp

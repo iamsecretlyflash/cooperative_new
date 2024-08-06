@@ -202,12 +202,7 @@ class TextClassificationPipeline(Pipeline):
                 function_to_apply = ClassificationFunction.NONE
 
         outputs = model_outputs["logits"][0]
-
-        if self.framework == "pt":
-            # To enable using fp16 and bf16
-            outputs = outputs.float().numpy()
-        else:
-            outputs = outputs.numpy()
+        outputs = outputs.numpy()
 
         if function_to_apply == ClassificationFunction.SIGMOID:
             scores = sigmoid(outputs)

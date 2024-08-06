@@ -154,7 +154,6 @@ class TestTokenizationLED(TokenizerTesterMixin, unittest.TestCase):
             outputs = tokenizer.pad(encoded_output)
             self.assertSequenceEqual(outputs["global_attention_mask"], expected_global_attention_mask)
 
-    @unittest.skip
     def test_pretokenized_inputs(self):
         pass
 

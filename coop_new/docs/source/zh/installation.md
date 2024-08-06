@@ -169,7 +169,7 @@ conda install conda-forge::transformers
 
 ## 离线模式
 
-🤗 Transformers 可以仅使用本地文件在防火墙或离线环境中运行。设置环境变量 `HF_HUB_OFFLINE=1` 以启用该行为。
+🤗 Transformers 可以仅使用本地文件在防火墙或离线环境中运行。设置环境变量 `TRANSFORMERS_OFFLINE=1` 以启用该行为。
 
 <Tip>
 
@@ -186,7 +186,7 @@ python examples/pytorch/translation/run_translation.py --model_name_or_path goog
 在离线环境中运行相同的程序：
 
 ```bash
-HF_DATASETS_OFFLINE=1 HF_HUB_OFFLINE=1 \
+HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
 python examples/pytorch/translation/run_translation.py --model_name_or_path google-t5/t5-small --dataset_name wmt16 --dataset_config ro-en ...
 ```
 

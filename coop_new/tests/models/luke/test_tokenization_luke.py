@@ -130,7 +130,6 @@ class LukeTokenizerTest(TokenizerTesterMixin, unittest.TestCase):
         first_char = tokenizer.convert_ids_to_tokens(encoded[mask_loc + 1])[0]
         self.assertNotEqual(first_char, space_encoding)
 
-    @unittest.skip
     def test_pretokenized_inputs(self):
         pass
 
@@ -188,7 +187,7 @@ class LukeTokenizerTest(TokenizerTesterMixin, unittest.TestCase):
         with self.assertRaises(ValueError):
             tokenizer(sentence, entities=tuple(entities), entity_spans=spans)
 
-        with self.assertRaises(TypeError):
+        with self.assertRaises(ValueError):
             tokenizer(sentence, entities=entities, entity_spans=tuple(spans))
 
         with self.assertRaises(ValueError):

@@ -14,7 +14,6 @@
 """
 Hub utilities: utilities related to download and cache models
 """
-
 import json
 import os
 import re
@@ -51,11 +50,9 @@ from huggingface_hub.utils import (
     GatedRepoError,
     HFValidationError,
     LocalEntryNotFoundError,
-    OfflineModeIsEnabled,
     RepositoryNotFoundError,
     RevisionNotFoundError,
     build_hf_headers,
-    get_session,
     hf_raise_for_status,
     send_telemetry,
 )
@@ -77,7 +74,7 @@ from .logging import tqdm
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
-_is_offline_mode = huggingface_hub.constants.HF_HUB_OFFLINE
+_is_offline_mode = True if os.environ.get("TRANSFORMERS_OFFLINE", "0").upper() in ENV_VARS_TRUE_VALUES else False
 
 
 def is_offline_mode():
@@ -271,7 +268,7 @@ def cached_file(
     filename: str,
     cache_dir: Optional[Union[str, os.PathLike]] = None,
     force_download: bool = False,
-    resume_download: Optional[bool] = None,
+    resume_download: bool = False,
     proxies: Optional[Dict[str, str]] = None,
     token: Optional[Union[bool, str]] = None,
     revision: Optional[str] = None,
@@ -302,9 +299,8 @@ def cached_file(
         force_download (`bool`, *optional*, defaults to `False`):
             Whether or not to force to (re-)download the configuration files and override the cached versions if they
             exist.
-        resume_download:
-            Deprecated and ignored. All downloads are now resumed by default when possible.
-            Will be removed in v5 of Transformers.
+        resume_download (`bool`, *optional*, defaults to `False`):
+            Whether or not to delete incompletely received file. Attempts to resume the download if such a file exists.
         proxies (`Dict[str, str]`, *optional*):
             A dictionary of proxy servers to use by protocol or endpoint, e.g., `{'http': 'foo.bar:3128',
             'http://hostname': 'foo.bar:4012'}.` The proxies are used on each request.
@@ -455,7 +451,7 @@ def cached_file(
             revision = "main"
         raise EnvironmentError(
             f"{path_or_repo_id} does not appear to have a file named {full_filename}. Checkout "
-            f"'https://huggingface.co/{path_or_repo_id}/tree/{revision}' for available files."
+            f"'https://huggingface.co/{path_or_repo_id}/{revision}' for available files."
         ) from e
     except HTTPError as err:
         resolved_file = _get_cache_file_to_return(path_or_repo_id, full_filename, cache_dir, revision)
@@ -478,7 +474,7 @@ def get_file_from_repo(
     filename: str,
     cache_dir: Optional[Union[str, os.PathLike]] = None,
     force_download: bool = False,
-    resume_download: Optional[bool] = None,
+    resume_download: bool = False,
     proxies: Optional[Dict[str, str]] = None,
     token: Optional[Union[bool, str]] = None,
     revision: Optional[str] = None,
@@ -503,9 +499,8 @@ def get_file_from_repo(
         force_download (`bool`, *optional*, defaults to `False`):
             Whether or not to force to (re-)download the configuration files and override the cached versions if they
             exist.
-        resume_download:
-            Deprecated and ignored. All downloads are now resumed by default when possible.
-            Will be removed in v5 of Transformers.
+        resume_download (`bool`, *optional*, defaults to `False`):
+            Whether or not to delete incompletely received file. Attempts to resume the download if such a file exists.
         proxies (`Dict[str, str]`, *optional*):
             A dictionary of proxy servers to use by protocol or endpoint, e.g., `{'http': 'foo.bar:3128',
             'http://hostname': 'foo.bar:4012'}.` The proxies are used on each request.
@@ -601,16 +596,10 @@ def has_file(
     revision: Optional[str] = None,
     proxies: Optional[Dict[str, str]] = None,
     token: Optional[Union[bool, str]] = None,
-    *,
-    local_files_only: bool = False,
-    cache_dir: Union[str, Path, None] = None,
-    repo_type: Optional[str] = None,
     **deprecated_kwargs,
 ):
     """
     Checks if a repo contains a given file without downloading it. Works for remote repos and local folders.
-
-    If offline mode is enabled, checks if the file exists in the cache.
 
     <Tip warning={false}>
 
@@ -629,41 +618,15 @@ def has_file(
             raise ValueError("`token` and `use_auth_token` are both specified. Please set only the argument `token`.")
         token = use_auth_token
 
-    # If path to local directory, check if the file exists
     if os.path.isdir(path_or_repo):
         return os.path.isfile(os.path.join(path_or_repo, filename))
 
-    # Else it's a repo => let's check if the file exists in local cache or on the Hub
+    url = hf_hub_url(path_or_repo, filename=filename, revision=revision)
+    headers = build_hf_headers(token=token, user_agent=http_user_agent())
 
-    # Check if file exists in cache
-    # This information might be outdated so it's best to also make a HEAD call (if allowed).
-    cached_path = try_to_load_from_cache(
-        repo_id=path_or_repo,
-        filename=filename,
-        revision=revision,
-        repo_type=repo_type,
-        cache_dir=cache_dir,
-    )
-    has_file_in_cache = isinstance(cached_path, str)
-
-    # If local_files_only, don't try the HEAD call
-    if local_files_only:
-        return has_file_in_cache
-
-    # Check if the file exists
+    r = requests.head(url, headers=headers, allow_redirects=False, proxies=proxies, timeout=10)
     try:
-        response = get_session().head(
-            hf_hub_url(path_or_repo, filename=filename, revision=revision, repo_type=repo_type),
-            headers=build_hf_headers(token=token, user_agent=http_user_agent()),
-            allow_redirects=False,
-            proxies=proxies,
-            timeout=10,
-        )
-    except OfflineModeIsEnabled:
-        return has_file_in_cache
-
-    try:
-        hf_raise_for_status(response)
+        hf_raise_for_status(r)
         return True
     except GatedRepoError as e:
         logger.error(e)
@@ -674,20 +637,16 @@ def has_file(
         ) from e
     except RepositoryNotFoundError as e:
         logger.error(e)
-        raise EnvironmentError(
-            f"{path_or_repo} is not a local folder or a valid repository name on 'https://hf.co'."
-        ) from e
+        raise EnvironmentError(f"{path_or_repo} is not a local folder or a valid repository name on 'https://hf.co'.")
     except RevisionNotFoundError as e:
         logger.error(e)
         raise EnvironmentError(
             f"{revision} is not a valid git identifier (branch name, tag name or commit id) that exists for this "
             f"model name. Check the model page at 'https://huggingface.co/{path_or_repo}' for available revisions."
-        ) from e
-    except EntryNotFoundError:
-        return False  # File does not exist
+        )
     except requests.HTTPError:
-        # Any authentication/authorization error will be caught here => default to cache
-        return has_file_in_cache
+        # We return false for EntryNotFoundError (logical) as well as any connection error.
+        return False
 
 
 class PushToHubMixin:
@@ -1018,7 +977,7 @@ def get_checkpoint_shard_files(
     cache_dir=None,
     force_download=False,
     proxies=None,
-    resume_download=None,
+    resume_download=False,
     local_files_only=False,
     token=None,
     user_agent=None,

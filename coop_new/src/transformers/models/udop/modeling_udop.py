@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""PyTorch UDOP model."""
+""" PyTorch UDOP model."""
 
 import collections
 import logging
@@ -45,6 +45,9 @@ from ...utils import (
 
 
 logger = logging.getLogger(__name__)
+
+
+from ..deprecated._archive_maps import UDOP_PRETRAINED_MODEL_ARCHIVE_LIST  # noqa: F401, E402
 
 
 _CONFIG_FOR_DOC = "UdopConfig"
@@ -410,6 +413,7 @@ class UdopPreTrainedModel(PreTrainedModel):
     config_class = UdopConfig
     base_model_prefix = "transformer"
     supports_gradient_checkpointing = True
+    _no_split_modules = ["UdopBlock"]
     _keep_in_fp32_modules = ["wo"]
 
     def _init_weights(self, module):
@@ -1297,7 +1301,7 @@ class UdopStack(UdopPreTrainedModel):
         # get weights from encoder position bias
         self.relative_bias = self._get_relative_bias(config)
 
-    def _tie_weights(self):
+        # tie weights of original position bias of encoder
         for bias in self.relative_bias.biases:
             if isinstance(bias, RelativePositionBias1D):
                 self._tie_or_clone_weights(
@@ -1594,15 +1598,10 @@ class UdopModel(UdopPreTrainedModel):
         >>> from datasets import load_dataset
         >>> import torch
 
-        >>> # load model and processor
-        >>> # in this case, we already have performed OCR ourselves
-        >>> # so we initialize the processor with `apply_ocr=False`
         >>> processor = AutoProcessor.from_pretrained("microsoft/udop-large", apply_ocr=False)
         >>> model = AutoModel.from_pretrained("microsoft/udop-large")
 
-        >>> # load an example image, along with the words and coordinates
-        >>> # which were extracted using an OCR engine
-        >>> dataset = load_dataset("nielsr/funsd-layoutlmv3", split="train", trust_remote_code=True)
+        >>> dataset = load_dataset("nielsr/funsd-layoutlmv3", split="train")
         >>> example = dataset[0]
         >>> image = example["image"]
         >>> words = example["tokens"]
@@ -1774,21 +1773,14 @@ class UdopForConditionalGeneration(UdopPreTrainedModel):
         >>> from datasets import load_dataset
 
         >>> # load model and processor
-        >>> # in this case, we already have performed OCR ourselves
-        >>> # so we initialize the processor with `apply_ocr=False`
         >>> processor = AutoProcessor.from_pretrained("microsoft/udop-large", apply_ocr=False)
         >>> model = UdopForConditionalGeneration.from_pretrained("microsoft/udop-large")
 
-        >>> # load an example image, along with the words and coordinates
-        >>> # which were extracted using an OCR engine
-        >>> dataset = load_dataset("nielsr/funsd-layoutlmv3", split="train", trust_remote_code=True)
+        >>> dataset = load_dataset("nielsr/funsd-layoutlmv3", split="train")
         >>> example = dataset[0]
         >>> image = example["image"]
         >>> words = example["tokens"]
         >>> boxes = example["bboxes"]
-
-        >>> # one can use the various task prefixes (prompts) used during pre-training
-        >>> # e.g. the task prefix for DocVQA is "Question answering. "
         >>> question = "Question answering. What is the date on the form?"
         >>> encoding = processor(image, question, words, boxes=boxes, return_tensors="pt")
 
@@ -2001,15 +1993,10 @@ class UdopEncoderModel(UdopPreTrainedModel):
         >>> from huggingface_hub import hf_hub_download
         >>> from datasets import load_dataset
 
-        >>> # load model and processor
-        >>> # in this case, we already have performed OCR ourselves
-        >>> # so we initialize the processor with `apply_ocr=False`
         >>> processor = AutoProcessor.from_pretrained("microsoft/udop-large", apply_ocr=False)
         >>> model = UdopEncoderModel.from_pretrained("microsoft/udop-large")
 
-        >>> # load an example image, along with the words and coordinates
-        >>> # which were extracted using an OCR engine
-        >>> dataset = load_dataset("nielsr/funsd-layoutlmv3", split="train", trust_remote_code=True)
+        >>> dataset = load_dataset("nielsr/funsd-layoutlmv3", split="train")
         >>> example = dataset[0]
         >>> image = example["image"]
         >>> words = example["tokens"]

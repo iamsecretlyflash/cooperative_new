@@ -12,7 +12,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Testing suite for the PyTorch TimeSformer model."""
+""" Testing suite for the PyTorch TimeSformer model. """
+
 
 import copy
 import unittest
@@ -192,7 +193,7 @@ class TimesformerModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestC
     def test_inputs_embeds(self):
         pass
 
-    def test_model_get_set_embeddings(self):
+    def test_model_common_attributes(self):
         config, _ = self.model_tester.prepare_config_and_inputs_for_common()
 
         for model_class in self.all_model_classes:
@@ -217,7 +218,7 @@ class TimesformerModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestC
 
     def test_attention_outputs(self):
         if not self.has_attentions:
-            self.skipTest(reason="Model has no attentions")
+            pass
 
         else:
             config, inputs_dict = self.model_tester.prepare_config_and_inputs_for_common()

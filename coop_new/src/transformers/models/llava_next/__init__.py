@@ -17,7 +17,7 @@ from ...utils import OptionalDependencyNotAvailable, _LazyModule, is_torch_avail
 
 
 _import_structure = {
-    "configuration_llava_next": ["LlavaNextConfig"],
+    "configuration_llava_next": ["LLAVA_NEXT_PRETRAINED_CONFIG_ARCHIVE_MAP", "LlavaNextConfig"],
     "processing_llava_next": ["LlavaNextProcessor"],
 }
 
@@ -29,6 +29,7 @@ except OptionalDependencyNotAvailable:
     pass
 else:
     _import_structure["modeling_llava_next"] = [
+        "LLAVA_NEXT_PRETRAINED_MODEL_ARCHIVE_LIST",
         "LlavaNextForConditionalGeneration",
         "LlavaNextPreTrainedModel",
     ]
@@ -43,7 +44,7 @@ else:
 
 
 if TYPE_CHECKING:
-    from .configuration_llava_next import LlavaNextConfig
+    from .configuration_llava_next import LLAVA_NEXT_PRETRAINED_CONFIG_ARCHIVE_MAP, LlavaNextConfig
     from .processing_llava_next import LlavaNextProcessor
 
     try:
@@ -53,6 +54,7 @@ if TYPE_CHECKING:
         pass
     else:
         from .modeling_llava_next import (
+            LLAVA_NEXT_PRETRAINED_MODEL_ARCHIVE_LIST,
             LlavaNextForConditionalGeneration,
             LlavaNextPreTrainedModel,
         )

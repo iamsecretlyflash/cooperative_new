@@ -2131,6 +2131,7 @@ class Trainer:
 
         total_batched_samples = 0
         for epoch in range(epochs_trained, num_train_epochs):
+            print(f"Std Epochs : {args.num_std_epochs} | Coop Epochs : {args.num_coop_epochs}")
             if epoch >= args.num_std_epochs:
                 print("TRAINING COOPERATIVE")
                 for v in reversed(list(dict(model.named_modules()).values())):
@@ -2139,6 +2140,9 @@ class Trainer:
                        v.initialize_prior_fine()
             else:
                 print("TRAINING STANDARD")
+                for v in reversed(list(dict(model.named_modules()).values())):
+                   if type(v).__name__ == 'CooperativeLinear' or type(v).__name__ == 'CooperativeConv1D':
+                       v.train_cooperative = False
             epoch_iterator = train_dataloader
             if hasattr(epoch_iterator, "set_epoch"):
                 epoch_iterator.set_epoch(epoch)

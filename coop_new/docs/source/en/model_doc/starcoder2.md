@@ -42,10 +42,11 @@ These ready-to-use checkpoints can be downloaded and used via the HuggingFace Hu
 >>> prompt = "def print_hello_world():"
 
 >>> model_inputs = tokenizer([prompt], return_tensors="pt").to("cuda")
+>>> model.to(device)
 
 >>> generated_ids = model.generate(**model_inputs, max_new_tokens=10, do_sample=False)
 >>> tokenizer.batch_decode(generated_ids)[0]
-'def print_hello_world():\n    print("Hello World!")\n\ndef print'
+"def print_hello_world():\n\treturn 'Hello World!'"
 ```
 
 ## Starcoder2Config
@@ -65,9 +66,4 @@ These ready-to-use checkpoints can be downloaded and used via the HuggingFace Hu
 ## Starcoder2ForSequenceClassification
 
 [[autodoc]] Starcoder2ForSequenceClassification
-    - forward
-
-## Starcoder2ForTokenClassification
-
-[[autodoc]] Starcoder2ForTokenClassification
     - forward

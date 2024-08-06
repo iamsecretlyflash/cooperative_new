@@ -12,7 +12,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Testing suite for the TensorFlow VisionEncoderDecoder model."""
+""" Testing suite for the TensorFlow VisionEncoderDecoder model. """
+
 
 from __future__ import annotations
 
@@ -491,9 +492,7 @@ class TFVisionEncoderDecoderMixin:
 
         with tempfile.TemporaryDirectory() as tmpdirname:
             tf_model.save_pretrained(tmpdirname, safe_serialization=False)
-            pt_model = VisionEncoderDecoderModel.from_pretrained(
-                tmpdirname, from_tf=True, attn_implementation=tf_model.config._attn_implementation
-            )
+            pt_model = VisionEncoderDecoderModel.from_pretrained(tmpdirname, from_tf=True)
 
         self.check_pt_tf_equivalence(tf_model, pt_model, tf_inputs_dict)
 

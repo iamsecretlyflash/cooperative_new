@@ -208,10 +208,14 @@ from transformers import pipeline
 classifier = pipeline("pair-classification", model="sgugger/finetuned-bert-mrpc")
 ```
 
-Dann können wir sie auf dem Hub mit der Methode `push_to_hub` freigeben:
+Dann können wir sie auf dem Hub mit der Methode `save_pretrained` in einem `Repository` freigeben:
 
 ```py
-classifier.push_to_hub("test-dynamic-pipeline")
+from huggingface_hub import Repository
+
+repo = Repository("test-dynamic-pipeline", clone_from="{your_username}/test-dynamic-pipeline")
+classifier.save_pretrained("test-dynamic-pipeline")
+repo.push_to_hub()
 ```
 
 Dadurch wird die Datei, in der Sie `PairClassificationPipeline` definiert haben, in den Ordner `"test-dynamic-pipeline"` kopiert,

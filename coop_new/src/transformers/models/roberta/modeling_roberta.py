@@ -15,6 +15,8 @@
 # limitations under the License.
 """PyTorch RoBERTa model."""
 
+import loralib as lora
+#import sparselib as sparseft
 import math
 from typing import List, Optional, Tuple, Union
 
@@ -22,6 +24,7 @@ import torch
 import torch.utils.checkpoint
 from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
+from ...pytorch_utils import softmax_backward_data, CooperativeLinear
 
 from ...activations import ACT2FN, gelu
 from ...modeling_outputs import (
@@ -50,6 +53,9 @@ logger = logging.get_logger(__name__)
 
 _CHECKPOINT_FOR_DOC = "FacebookAI/roberta-base"
 _CONFIG_FOR_DOC = "RobertaConfig"
+
+
+from ..deprecated._archive_maps import ROBERTA_PRETRAINED_MODEL_ARCHIVE_LIST  # noqa: F401, E402
 
 
 class RobertaEmbeddings(nn.Module):
@@ -85,7 +91,8 @@ class RobertaEmbeddings(nn.Module):
 
     def forward(
         self, input_ids=None, token_type_ids=None, position_ids=None, inputs_embeds=None, past_key_values_length=0
-    ):
+    ):  
+
         if position_ids is None:
             if input_ids is not None:
                 # Create the position ids from the input token ids. Any padded tokens remain padded.
@@ -155,9 +162,26 @@ class RobertaSelfAttention(nn.Module):
         self.attention_head_size = int(config.hidden_size / config.num_attention_heads)
         self.all_head_size = self.num_attention_heads * self.attention_head_size
 
-        self.query = nn.Linear(config.hidden_size, self.all_head_size)
-        self.key = nn.Linear(config.hidden_size, self.all_head_size)
-        self.value = nn.Linear(config.hidden_size, self.all_head_size)
+        if config.apply_sparseft and "value" in config.sparseft_module:
+            self.value = sparseft.SparseFT(config.hidden_size, self.all_head_size, config.sparseft_type)
+        elif "value" in config.expert_locations:
+            self.value=CooperativeLinear(config.hidden_size, self.all_head_size, config.num_experts, bias=True, use_averaging=config.use_averaging, sample_period=config.sample_period, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy, kl_loss_weight=config.kl_loss_weight, train_cooperative=config.train_cooperative)
+        else:
+            self.value = nn.Linear(config.hidden_size, self.all_head_size)
+
+        if config.apply_sparseft and "query" in config.sparseft_module:
+            self.query = sparseft.SparseFT(config.hidden_size, self.all_head_size, config.sparseft_type)
+        elif "query" in config.expert_locations:
+            self.query=CooperativeLinear(config.hidden_size, self.all_head_size, config.num_experts, bias=True, use_averaging=config.use_averaging, sample_period=config.sample_period, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy, kl_loss_weight=config.kl_loss_weight, train_cooperative=config.train_cooperative)
+        else:
+            self.query = nn.Linear(config.hidden_size, self.all_head_size)
+
+        if config.apply_sparseft and "key" in config.sparseft_module:
+            self.key = sparseft.SparseFT(config.hidden_size, self.all_head_size, config.sparseft_type)
+        elif "key" in config.expert_locations:
+            self.key= CooperativeLinear(config.hidden_size, self.all_head_size, config.num_experts, bias=True, use_averaging=config.use_averaging, sample_period=config.sample_period, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy, kl_loss_weight=config.kl_loss_weight, train_cooperative=config.train_cooperative)
+        else:
+            self.key = nn.Linear(config.hidden_size, self.all_head_size)
 
         self.dropout = nn.Dropout(config.attention_probs_dropout_prob)
         self.position_embedding_type = position_embedding_type or getattr(
@@ -280,7 +304,12 @@ class RobertaSelfAttention(nn.Module):
 class RobertaSelfOutput(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.dense = nn.Linear(config.hidden_size, config.hidden_size)
+        if config.apply_sparseft and "attention.output" in config.sparseft_module:
+            self.dense = sparseft.SparseFT(config.hidden_size, config.hidden_size, config.sparseft_type)
+        elif "attention.output" in config.expert_locations:
+            self.dense=CooperativeLinear(config.hidden_size, config.hidden_size, config.num_experts, bias=True, use_averaging=config.use_averaging, sample_period=config.sample_period, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy, kl_loss_weight=config.kl_loss_weight, train_cooperative=config.train_cooperative)
+        else:
+            self.dense = nn.Linear(config.hidden_size, config.hidden_size)
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
@@ -291,18 +320,11 @@ class RobertaSelfOutput(nn.Module):
         return hidden_states
 
 
-ROBERTA_SELF_ATTENTION_CLASSES = {
-    "eager": RobertaSelfAttention,
-}
-
-
-# Copied from transformers.models.bert.modeling_bert.BertAttention with Bert->Roberta,BERT->ROBERTA
+# Copied from transformers.models.bert.modeling_bert.BertAttention with Bert->Roberta
 class RobertaAttention(nn.Module):
     def __init__(self, config, position_embedding_type=None):
         super().__init__()
-        self.self = ROBERTA_SELF_ATTENTION_CLASSES[config._attn_implementation](
-            config, position_embedding_type=position_embedding_type
-        )
+        self.self = RobertaSelfAttention(config, position_embedding_type=position_embedding_type)
         self.output = RobertaSelfOutput(config)
         self.pruned_heads = set()
 
@@ -352,7 +374,12 @@ class RobertaAttention(nn.Module):
 class RobertaIntermediate(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.dense = nn.Linear(config.hidden_size, config.intermediate_size)
+        if config.apply_sparseft and "intermediate" in config.sparseft_module:
+            self.dense = sparseft.SparseFT(config.hidden_size, config.intermediate_size, config.sparseft_type)
+        elif "intermediate" in config.expert_locations:
+            self.dense=CooperativeLinear(config.hidden_size, config.intermediate_size, config.num_experts, bias=True, use_averaging=config.use_averaging, sample_period=config.sample_period, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy, kl_loss_weight=config.kl_loss_weight, train_cooperative=config.train_cooperative)
+        else:
+            self.dense = nn.Linear(config.hidden_size, config.intermediate_size)
         if isinstance(config.hidden_act, str):
             self.intermediate_act_fn = ACT2FN[config.hidden_act]
         else:
@@ -368,7 +395,12 @@ class RobertaIntermediate(nn.Module):
 class RobertaOutput(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.dense = nn.Linear(config.intermediate_size, config.hidden_size)
+        if config.apply_sparseft and "layer.output" in config.sparseft_module:
+            self.dense = sparseft.SparseFT(config.intermediate_size, config.hidden_size, config.sparseft_type)
+        elif "layer.output" in config.expert_locations:
+            self.dense=CooperativeLinear(config.intermediate_size, config.hidden_size, config.num_experts, bias=True, use_averaging=config.use_averaging, sample_period=config.sample_period, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy, kl_loss_weight=config.kl_loss_weight, train_cooperative=config.train_cooperative)
+        else:
+            self.dense = nn.Linear(config.intermediate_size, config.hidden_size)
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
@@ -692,7 +724,7 @@ class RobertaModel(RobertaPreTrainedModel):
 
     """
 
-    # Copied from transformers.models.clap.modeling_clap.ClapTextModel.__init__ with ClapText->Roberta
+    # Copied from transformers.models.bert.modeling_bert.BertModel.__init__ with Bert->Roberta
     def __init__(self, config, add_pooling_layer=True):
         super().__init__(config)
         self.config = config
@@ -725,7 +757,7 @@ class RobertaModel(RobertaPreTrainedModel):
         output_type=BaseModelOutputWithPoolingAndCrossAttentions,
         config_class=_CONFIG_FOR_DOC,
     )
-    # Copied from transformers.models.clap.modeling_clap.ClapTextModel.forward
+    # Copied from transformers.models.bert.modeling_bert.BertModel.forward
     def forward(
         self,
         input_ids: Optional[torch.Tensor] = None,
@@ -762,6 +794,7 @@ class RobertaModel(RobertaPreTrainedModel):
             If set to `True`, `past_key_values` key value states are returned and can be used to speed up decoding (see
             `past_key_values`).
         """
+        
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
@@ -1073,7 +1106,7 @@ class RobertaForMaskedLM(RobertaPreTrainedModel):
             Labels for computing the masked language modeling loss. Indices should be in `[-100, 0, ...,
             config.vocab_size]` (see `input_ids` docstring) Tokens with indices set to `-100` are ignored (masked), the
             loss is only computed for the tokens with labels in `[0, ..., config.vocab_size]`
-        kwargs (`Dict[str, any]`, *optional*, defaults to `{}`):
+        kwargs (`Dict[str, any]`, optional, defaults to *{}*):
             Used to hide legacy arguments that have been deprecated.
         """
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict

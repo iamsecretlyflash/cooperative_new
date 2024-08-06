@@ -226,20 +226,6 @@ class UdopModelTester:
         )
         self.parent.assertTrue(torch.all(output_with_past_cache == output_without_past_cache))
 
-    def create_and_check_model_fp16_forward(
-        self,
-        config,
-        input_ids,
-        bbox,
-        decoder_input_ids,
-        attention_mask,
-        decoder_attention_mask,
-        lm_labels,
-    ):
-        model = UdopForConditionalGeneration(config=config).to(torch_device).half().eval()
-        output = model(input_ids, bbox=bbox, attention_mask=attention_mask, decoder_input_ids=decoder_input_ids).logits
-        self.parent.assertFalse(torch.isnan(output).any().item())
-
     def prepare_config_and_inputs_for_common(self):
         config_and_inputs = self.prepare_config_and_inputs()
         (
@@ -282,7 +268,6 @@ class UdopModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
     test_resize_embeddings = True
     test_model_parallel = False
     is_encoder_decoder = True
-    test_cpu_offload = False
     # The small UDOP model needs higher percentages for CPU/MP tests
     model_split_percents = [0.8, 0.9]
 
@@ -320,7 +305,7 @@ class UdopModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
         self.model_tester.create_and_check_model_fp16_forward(*config_and_inputs)
 
-    @unittest.skip(reason="Gradient checkpointing is not supported by this model")
+    @unittest.skip("Gradient checkpointing is not supported by this model")
     def test_training_gradient_checkpointing(self):
         pass
 
@@ -506,11 +491,10 @@ class UdopEncoderOnlyModelTester:
         self,
         config,
         input_ids,
-        bbox,
         attention_mask,
     ):
         model = UdopEncoderModel(config=config).to(torch_device).half().eval()
-        output = model(input_ids, bbox=bbox, attention_mask=attention_mask)["last_hidden_state"]
+        output = model(input_ids, attention_mask=attention_mask)["last_hidden_state"]
         self.parent.assertFalse(torch.isnan(output).any().item())
 
 
@@ -520,7 +504,7 @@ class UdopEncoderOnlyModelTest(ModelTesterMixin, unittest.TestCase):
     test_torchscript = False
     test_head_masking = False
     test_resize_embeddings = False
-    test_model_parallel = False
+    test_model_parallel = True
     all_parallelizable_model_classes = (UdopEncoderModel,) if is_torch_available() else ()
 
     def setUp(self):
@@ -533,6 +517,11 @@ class UdopEncoderOnlyModelTest(ModelTesterMixin, unittest.TestCase):
     def test_model(self):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
         self.model_tester.create_and_check_model(*config_and_inputs)
+
+    @unittest.skipIf(torch_device == "cpu", "Cant do half precision")
+    def test_model_fp16_forward(self):
+        config_and_inputs = self.model_tester.prepare_config_and_inputs()
+        self.model_tester.create_and_check_model_fp16_forward(*config_and_inputs)
 
     @unittest.skip(
         "Not currently compatible. Fails with - NotImplementedError: Cannot copy out of meta tensor; no data!"
@@ -569,9 +558,9 @@ class UdopModelIntegrationTests(unittest.TestCase):
         model = self.model
 
         prompt = "Question answering. In which year is the report made?"
-        encoding = processor(images=self.image, text=prompt, return_tensors="pt").to(torch_device)
+        encoding = processor(images=self.image, text=prompt, return_tensors="pt")
 
         predicted_ids = model.generate(**encoding)
 
         predicted_text = processor.batch_decode(predicted_ids, skip_special_tokens=True)[0]
-        self.assertEqual(predicted_text, "2013")
+        self.assertEquals(predicted_text, "2013")

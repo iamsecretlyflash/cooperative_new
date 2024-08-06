@@ -15,7 +15,6 @@
 """
 Feature extractor class for Musicgen Melody
 """
-
 import copy
 from typing import Any, Dict, List, Optional, Union
 

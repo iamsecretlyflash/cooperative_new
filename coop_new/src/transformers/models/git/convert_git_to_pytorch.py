@@ -16,6 +16,7 @@
 
 URL: https://github.com/microsoft/GenerativeImage2Text/tree/main"""
 
+
 import argparse
 from pathlib import Path
 

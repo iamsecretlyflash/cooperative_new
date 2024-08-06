@@ -113,6 +113,7 @@ class Wav2Vec2CTCTokenizerOutput(ModelOutput):
 
 
 class Wav2Vec2CTCTokenizer(PreTrainedTokenizer):
+
     """
     Constructs a Wav2Vec2CTC tokenizer.
 
@@ -419,9 +420,7 @@ class Wav2Vec2CTCTokenizer(PreTrainedTokenizer):
 
         result = []
         for token in filtered_tokens:
-            if skip_special_tokens and (
-                token in self.all_special_ids or (token != self.pad_token and token in self.all_special_tokens)
-            ):
+            if skip_special_tokens and token in self.all_special_ids:
                 continue
             result.append(token)
 
@@ -590,7 +589,7 @@ class Wav2Vec2CTCTokenizer(PreTrainedTokenizer):
         >>> feature_extractor = AutoFeatureExtractor.from_pretrained("facebook/wav2vec2-base-960h")
 
         >>> # load first sample of English common_voice
-        >>> dataset = load_dataset("mozilla-foundation/common_voice_11_0", "en", split="train", streaming=True, trust_remote_code=True)
+        >>> dataset = load_dataset("mozilla-foundation/common_voice_11_0", "en", split="train", streaming=True)
         >>> dataset = dataset.cast_column("audio", datasets.Audio(sampling_rate=16_000))
         >>> dataset_iter = iter(dataset)
         >>> sample = next(dataset_iter)
@@ -882,9 +881,7 @@ class Wav2Vec2Tokenizer(PreTrainedTokenizer):
 
         result = []
         for token in filtered_tokens:
-            if skip_special_tokens and (
-                token in self.all_special_ids or (token != self.pad_token and token in self.all_special_tokens)
-            ):
+            if skip_special_tokens and token in self.all_special_ids:
                 continue
             result.append(token)
 

@@ -51,6 +51,9 @@ _CHECKPOINT_FOR_DOC = "google/reformer-crime-and-punishment"
 _CONFIG_FOR_DOC = "ReformerConfig"
 
 
+from ..deprecated._archive_maps import REFORMER_PRETRAINED_MODEL_ARCHIVE_LIST  # noqa: F401, E402
+
+
 # Define named tuples for nn.Modules here
 LSHSelfAttentionOutput = namedtuple("LSHSelfAttentionOutput", ["hidden_states", "attention_probs", "buckets"])
 LocalSelfAttentionOutput = namedtuple("LocalSelfAttentionOutput", ["hidden_states", "attention_probs"])
@@ -1765,13 +1768,9 @@ class ReformerOnlyLMHead(nn.Module):
         hidden_states = self.decoder(hidden_states)
         return hidden_states
 
-    def _tie_weights(self) -> None:
-        # For accelerate compatibility and to not break backward compatibility
-        if self.decoder.bias.device.type == "meta":
-            self.decoder.bias = self.bias
-        else:
-            # To tie those two weights if they get disconnected (on TPU or when the bias is resized)
-            self.bias = self.decoder.bias
+    def _tie_weights(self):
+        # To tie those two weights if they get disconnected (on TPU or when the bias is resized)
+        self.bias = self.decoder.bias
 
 
 class ReformerPreTrainedModel(PreTrainedModel):
@@ -2209,7 +2208,6 @@ class ReformerModelWithLMHead(ReformerPreTrainedModel):
 
     def set_output_embeddings(self, new_embeddings):
         self.lm_head.decoder = new_embeddings
-        self.lm_head.bias = new_embeddings.bias
 
     @add_start_docstrings_to_model_forward(REFORMER_INPUTS_DOCSTRING)
     @add_code_sample_docstrings(
@@ -2330,7 +2328,6 @@ class ReformerForMaskedLM(ReformerPreTrainedModel):
 
     def set_output_embeddings(self, new_embeddings):
         self.lm_head.decoder = new_embeddings
-        self.lm_head.bias = new_embeddings.bias
 
     @add_start_docstrings_to_model_forward(REFORMER_INPUTS_DOCSTRING)
     @replace_return_docstrings(output_type=MaskedLMOutput, config_class=_CONFIG_FOR_DOC)

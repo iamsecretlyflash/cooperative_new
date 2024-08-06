@@ -40,7 +40,7 @@ if is_torch_available():
     from transformers.models.distilbert.modeling_distilbert import _create_sinusoidal_embeddings
 
 
-class DistilBertModelTester:
+class DistilBertModelTester(object):
     def __init__(
         self,
         parent,
@@ -281,7 +281,7 @@ class DistilBertModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCa
         for model_class in self.all_model_classes:
             # BertForMultipleChoice behaves incorrectly in JIT environments.
             if model_class == DistilBertForMultipleChoice:
-                self.skipTest(reason="DistilBertForMultipleChoice behaves incorrectly in JIT environments.")
+                return
 
             config.torchscript = True
             model = model_class(config=config)
@@ -301,7 +301,7 @@ class DistilBertModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCa
     @require_torch_accelerator
     @pytest.mark.flash_attn_test
     @slow
-    def test_flash_attn_2_inference_equivalence(self):
+    def test_flash_attn_2_inference(self):
         import torch
 
         for model_class in self.all_model_classes:
@@ -353,7 +353,7 @@ class DistilBertModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCa
     @require_torch_accelerator
     @pytest.mark.flash_attn_test
     @slow
-    def test_flash_attn_2_inference_equivalence_right_padding(self):
+    def test_flash_attn_2_inference_padding_right(self):
         import torch
 
         for model_class in self.all_model_classes:

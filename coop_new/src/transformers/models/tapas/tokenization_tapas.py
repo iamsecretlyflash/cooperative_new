@@ -12,7 +12,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Tokenization class for TAPAS model."""
+""" Tokenization class for TAPAS model."""
+
 
 import collections
 import datetime
@@ -23,7 +24,7 @@ import os
 import re
 import unicodedata
 from dataclasses import dataclass
-from typing import Callable, Dict, Generator, List, Optional, Tuple, Union
+from typing import Callable, Dict, Generator, List, Optional, Text, Tuple, Union
 
 import numpy as np
 
@@ -69,19 +70,19 @@ class TokenCoordinates:
 
 @dataclass
 class TokenizedTable:
-    rows: List[List[List[str]]]
+    rows: List[List[List[Text]]]
     selected_tokens: List[TokenCoordinates]
 
 
 @dataclass(frozen=True)
 class SerializedExample:
-    tokens: List[str]
+    tokens: List[Text]
     column_ids: List[int]
     row_ids: List[int]
     segment_ids: List[int]
 
 
-def _is_inner_wordpiece(token: str):
+def _is_inner_wordpiece(token: Text):
     return token.startswith("##")
 
 
@@ -1249,7 +1250,7 @@ class TapasTokenizer(PreTrainedTokenizer):
                 Total number of table columns
             max_length (`int`):
                 Total maximum length.
-            truncation_strategy (`str` or [`TapasTruncationStrategy]`):
+            truncation_strategy (`str` or [`TapasTruncationStrategy`]):
                 Truncation strategy to use. Seeing as this method should only be called when truncating, the only
                 available strategy is the `"drop_rows_to_fit"` strategy.
 
@@ -1961,7 +1962,7 @@ class TapasTokenizer(PreTrainedTokenizer):
 
 
 # Copied from transformers.models.bert.tokenization_bert.BasicTokenizer
-class BasicTokenizer:
+class BasicTokenizer(object):
     """
     Constructs a BasicTokenizer that will run basic tokenization (punctuation splitting, lower casing, etc.).
 
@@ -2123,7 +2124,7 @@ class BasicTokenizer:
 
 
 # Copied from transformers.models.bert.tokenization_bert.WordpieceTokenizer
-class WordpieceTokenizer:
+class WordpieceTokenizer(object):
     """Runs WordPiece tokenization."""
 
     def __init__(self, vocab, unk_token, max_input_chars_per_word=100):
@@ -2223,14 +2224,14 @@ class NumericValueSpan:
 
 @dataclass
 class Cell:
-    text: str
+    text: Text
     numeric_value: Optional[NumericValue] = None
 
 
 @dataclass
 class Question:
-    original_text: str  # The original raw question string.
-    text: str  # The question string after normalization.
+    original_text: Text  # The original raw question string.
+    text: Text  # The question string after normalization.
     numeric_spans: Optional[List[NumericValueSpan]] = None
 
 

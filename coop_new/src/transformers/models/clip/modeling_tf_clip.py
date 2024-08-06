@@ -12,7 +12,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""TF 2.0 CLIP model."""
+""" TF 2.0 CLIP model."""
+
 
 from __future__ import annotations
 
@@ -49,6 +50,9 @@ from .configuration_clip import CLIPConfig, CLIPTextConfig, CLIPVisionConfig
 logger = logging.get_logger(__name__)
 
 _CHECKPOINT_FOR_DOC = "openai/clip-vit-base-patch32"
+
+
+from ..deprecated._archive_maps import TF_CLIP_PRETRAINED_MODEL_ARCHIVE_LIST  # noqa: F401, E402
 
 
 LARGE_NEGATIVE = -1e8
@@ -825,13 +829,13 @@ class TFCLIPMainLayer(keras.layers.Layer):
         super().__init__(**kwargs)
 
         if not isinstance(config.text_config, CLIPTextConfig):
-            raise TypeError(
+            raise ValueError(
                 "config.text_config is expected to be of type CLIPTextConfig but is of type"
                 f" {type(config.text_config)}."
             )
 
         if not isinstance(config.vision_config, CLIPVisionConfig):
-            raise TypeError(
+            raise ValueError(
                 "config.vision_config is expected to be of type CLIPVisionConfig but is of type"
                 f" {type(config.vision_config)}."
             )

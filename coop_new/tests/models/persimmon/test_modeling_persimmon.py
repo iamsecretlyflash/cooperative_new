@@ -12,7 +12,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Testing suite for the PyTorch Persimmon model."""
+""" Testing suite for the PyTorch Persimmon model. """
+
 
 import gc
 import unittest
@@ -22,7 +23,6 @@ from parameterized import parameterized
 from transformers import PersimmonConfig, is_torch_available, set_seed
 from transformers.testing_utils import (
     backend_empty_cache,
-    require_bitsandbytes,
     require_torch,
     require_torch_accelerator,
     require_torch_fp16,
@@ -43,7 +43,6 @@ if is_torch_available():
         AutoTokenizer,
         PersimmonForCausalLM,
         PersimmonForSequenceClassification,
-        PersimmonForTokenClassification,
         PersimmonModel,
     )
     from transformers.models.persimmon.modeling_persimmon import (
@@ -283,15 +282,12 @@ class PersimmonModelTester:
 @require_torch
 class PersimmonModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMixin, unittest.TestCase):
     all_model_classes = (
-        (PersimmonModel, PersimmonForCausalLM, PersimmonForSequenceClassification, PersimmonForTokenClassification)
-        if is_torch_available()
-        else ()
+        (PersimmonModel, PersimmonForCausalLM, PersimmonForSequenceClassification) if is_torch_available() else ()
     )
     pipeline_model_mapping = (
         {
             "feature-extraction": PersimmonModel,
             "text-classification": PersimmonForSequenceClassification,
-            "token-classification": PersimmonForTokenClassification,
             # TODO (ydshieh): check why these two fail. Fix them or skip them in a better way.
             # "text-generation": PersimmonForCausalLM,
             # "zero-shot": PersimmonForSequenceClassification,
@@ -368,23 +364,7 @@ class PersimmonModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTester
         result = model(input_ids, attention_mask=attention_mask, labels=sequence_labels)
         self.assertEqual(result.logits.shape, (self.model_tester.batch_size, self.model_tester.num_labels))
 
-    # Copied from tests.models.llama.test_modeling_llama.LlamaModelTest.test_llama_token_classification_model with Llama->Persimmon,llama->persimmon
-    def test_persimmon_token_classification_model(self):
-        config, input_dict = self.model_tester.prepare_config_and_inputs_for_common()
-        config.num_labels = 3
-        input_ids = input_dict["input_ids"]
-        attention_mask = input_ids.ne(1).to(torch_device)
-        token_labels = ids_tensor([self.model_tester.batch_size, self.model_tester.seq_length], config.num_labels)
-        model = PersimmonForTokenClassification(config=config)
-        model.to(torch_device)
-        model.eval()
-        result = model(input_ids, attention_mask=attention_mask, labels=token_labels)
-        self.assertEqual(
-            result.logits.shape,
-            (self.model_tester.batch_size, self.model_tester.seq_length, self.model_tester.num_labels),
-        )
-
-    @unittest.skip(reason="Persimmon buffers include complex numbers, which breaks this test")
+    @unittest.skip("Persimmon buffers include complex numbers, which breaks this test")
     # Copied from tests.models.llama.test_modeling_llama.LlamaModelTest.test_save_load_fast_init_from_base
     def test_save_load_fast_init_from_base(self):
         pass
@@ -485,8 +465,6 @@ class PersimmonModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTester
 @require_torch
 class PersimmonIntegrationTest(unittest.TestCase):
     @slow
-    @require_torch_accelerator
-    @require_bitsandbytes
     def test_model_8b_chat_logits(self):
         input_ids = [1, 306, 4658, 278, 6593, 310, 2834, 338]
         model = PersimmonForCausalLM.from_pretrained(
@@ -514,7 +492,6 @@ class PersimmonIntegrationTest(unittest.TestCase):
     @slow
     @require_torch_accelerator
     @require_torch_fp16
-    @require_bitsandbytes
     def test_model_8b_chat_greedy_generation(self):
         EXPECTED_TEXT_COMPLETION = """human: Simply put, the theory of relativity states that?\n\nadept: The theory of relativity states that the laws of physics are the same for all observers, regardless of their relative motion."""
         prompt = "human: Simply put, the theory of relativity states that?\n\nadept:"

@@ -12,11 +12,15 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""PyTorch DeBERTa-v2 model."""
+""" PyTorch DeBERTa-v2 model."""
 
+import loralib as lora
+#import sparselib as sparseft
+import math
 from collections.abc import Sequence
 from typing import Optional, Tuple, Union
 
+import numpy as np
 import torch
 import torch.utils.checkpoint
 from torch import nn
@@ -32,7 +36,7 @@ from ...modeling_outputs import (
     TokenClassifierOutput,
 )
 from ...modeling_utils import PreTrainedModel
-from ...pytorch_utils import softmax_backward_data
+from ...pytorch_utils import softmax_backward_data, CooperativeLinear
 from ...utils import add_code_sample_docstrings, add_start_docstrings, add_start_docstrings_to_model_forward, logging
 from .configuration_deberta_v2 import DebertaV2Config
 
@@ -43,6 +47,9 @@ _CONFIG_FOR_DOC = "DebertaV2Config"
 _CHECKPOINT_FOR_DOC = "microsoft/deberta-v2-xlarge"
 _QA_TARGET_START_INDEX = 2
 _QA_TARGET_END_INDEX = 9
+
+
+from ..deprecated._archive_maps import DEBERTA_V2_PRETRAINED_MODEL_ARCHIVE_LIST  # noqa: F401, E402
 
 
 # Copied from transformers.models.deberta.modeling_deberta.ContextPooler
@@ -98,20 +105,20 @@ class XSoftmax(torch.autograd.Function):
     ```"""
 
     @staticmethod
-    def forward(ctx, input, mask, dim):
-        ctx.dim = dim
+    def forward(self, input, mask, dim):
+        self.dim = dim
         rmask = ~(mask.to(torch.bool))
 
         output = input.masked_fill(rmask, torch.tensor(torch.finfo(input.dtype).min))
-        output = torch.softmax(output, ctx.dim)
+        output = torch.softmax(output, self.dim)
         output.masked_fill_(rmask, 0)
-        ctx.save_for_backward(output)
+        self.save_for_backward(output)
         return output
 
     @staticmethod
-    def backward(ctx, grad_output):
-        (output,) = ctx.saved_tensors
-        inputGrad = softmax_backward_data(ctx, grad_output, output, ctx.dim, output)
+    def backward(self, grad_output):
+        (output,) = self.saved_tensors
+        inputGrad = softmax_backward_data(self, grad_output, output, self.dim, output)
         return inputGrad, None, None
 
     @staticmethod
@@ -133,7 +140,7 @@ class XSoftmax(torch.autograd.Function):
 
 
 # Copied from transformers.models.deberta.modeling_deberta.DropoutContext
-class DropoutContext:
+class DropoutContext(object):
     def __init__(self):
         self.dropout = 0
         self.mask = None
@@ -255,7 +262,23 @@ class StableDropout(nn.Module):
 class DebertaV2SelfOutput(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.dense = nn.Linear(config.hidden_size, config.hidden_size)
+        if config.apply_lora and "attention.output" in config.lora_module:
+            if config.lora_type == "frd":
+                self.dense = lora.Linear(config.hidden_size, config.hidden_size, r=config.lora_r, 
+                                            lora_alpha=config.lora_alpha, merge_weights=False)
+            elif config.lora_type == "svd": 
+                self.dense = lora.SVDLinear(config.hidden_size, config.hidden_size, r=config.lora_r, 
+                                            lora_alpha=config.lora_alpha, merge_weights=False)
+            elif config.lora_type == "calra": 
+                self.dense = lora.CALRA(config.hidden_size, config.hidden_size, r=config.lora_r, 
+                                            lora_alpha=config.lora_alpha, merge_weights=False, N=config.num_experts)
+            else:
+                raise ValueError("Unimplemented Lora Type: %s"%config.lora_type)
+        elif 'attention.output' in config.expert_locations:
+            self.dense = CooperativeLinear(config.hidden_size, config.hidden_size, config.num_experts, bias=True, use_averaging=config.use_averaging, sample_period=config.sample_period, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy, kl_loss_weight=config.kl_loss_weight, train_cooperative=config.train_cooperative)
+        else:
+            self.dense = nn.Linear(config.hidden_size, config.hidden_size)
+
         self.LayerNorm = LayerNorm(config.hidden_size, config.layer_norm_eps)
         self.dropout = StableDropout(config.hidden_dropout_prob)
 
@@ -307,7 +330,26 @@ class DebertaV2Attention(nn.Module):
 class DebertaV2Intermediate(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.dense = nn.Linear(config.hidden_size, config.intermediate_size)
+        if config.apply_lora and "intermediate" in config.lora_module:
+            if config.lora_type == "frd":
+                self.dense = lora.Linear(config.hidden_size, config.intermediate_size, r=config.lora_r, 
+                                            lora_alpha=config.lora_alpha, merge_weights=False)
+            elif config.lora_type == "svd": 
+                self.dense = lora.SVDLinear(config.hidden_size, config.intermediate_size, r=config.lora_r, 
+                                            lora_alpha=config.lora_alpha, merge_weights=False)
+            elif config.lora_type == "calra": 
+                self.dense = lora.CALRA(config.hidden_size, config.intermediate_size, r=config.lora_r, 
+                                            lora_alpha=config.lora_alpha, merge_weights=False, N=config.num_experts)
+            else:
+                raise ValueError("Unimplemented Lora Type: %s"%config.lora_type)
+        elif config.apply_sparseft and "intermediate" in config.sparseft_module:
+                self.dense = sparseft.SparseFT(config.hidden_size, config.intermediate_size, config.sparseft_type)
+        elif 'intermediate' in config.expert_locations:
+            self.dense = CooperativeLinear(config.hidden_size, config.intermediate_size, config.num_experts, bias=True, use_averaging=config.use_averaging, sample_period=config.sample_period, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy, kl_loss_weight=config.kl_loss_weight, train_cooperative=config.train_cooperative)
+        else:
+            self.dense = nn.Linear(config.hidden_size, config.intermediate_size)
+        
+        
         if isinstance(config.hidden_act, str):
             self.intermediate_act_fn = ACT2FN[config.hidden_act]
         else:
@@ -323,7 +365,24 @@ class DebertaV2Intermediate(nn.Module):
 class DebertaV2Output(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.dense = nn.Linear(config.intermediate_size, config.hidden_size)
+        if config.apply_lora and "output" in config.lora_module:
+            if config.lora_type == "frd":
+                self.dense = lora.Linear(config.intermediate_size, config.hidden_size, r=config.lora_r, 
+                                            lora_alpha=config.lora_alpha, merge_weights=False)
+            elif config.lora_type == "svd": 
+                self.dense = lora.SVDLinear(config.intermediate_size, config.hidden_size, r=config.lora_r, 
+                                            lora_alpha=config.lora_alpha, merge_weights=False)
+            elif config.lora_type == "calra": 
+                self.dense = lora.CALRA(config.intermediate_size, config.hidden_size, r=config.lora_r, 
+                                            lora_alpha=config.lora_alpha, merge_weights=False, N=config.num_experts)
+            else:
+                raise ValueError("Unimplemented Lora Type: %s"%config.lora_type)
+        elif 'output' in config.expert_locations:
+            self.dense = CooperativeLinear(config.intermediate_size, config.hidden_size, config.num_experts, bias=True, use_averaging=config.use_averaging, sample_period=config.sample_period, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy, kl_loss_weight=config.kl_loss_weight, train_cooperative=config.train_cooperative)
+        else:
+            self.dense = nn.Linear(config.intermediate_size, config.hidden_size)
+        
+        
         self.LayerNorm = LayerNorm(config.hidden_size, config.layer_norm_eps)
         self.dropout = StableDropout(config.hidden_dropout_prob)
         self.config = config
@@ -411,7 +470,7 @@ class DebertaV2Encoder(nn.Module):
 
     def __init__(self, config):
         super().__init__()
-
+        print("MAKKAKAKAKAKAK ", config.expert_locations)
         self.layer = nn.ModuleList([DebertaV2Layer(config) for _ in range(config.num_hidden_layers)])
         self.relative_attention = getattr(config, "relative_attention", False)
 
@@ -614,6 +673,7 @@ class DisentangledSelfAttention(nn.Module):
     """
 
     def __init__(self, config):
+        print(config.expert_locations)
         super().__init__()
         if config.hidden_size % config.num_attention_heads != 0:
             raise ValueError(
@@ -624,10 +684,57 @@ class DisentangledSelfAttention(nn.Module):
         _attention_head_size = config.hidden_size // config.num_attention_heads
         self.attention_head_size = getattr(config, "attention_head_size", _attention_head_size)
         self.all_head_size = self.num_attention_heads * self.attention_head_size
-        self.query_proj = nn.Linear(config.hidden_size, self.all_head_size, bias=True)
-        self.key_proj = nn.Linear(config.hidden_size, self.all_head_size, bias=True)
-        self.value_proj = nn.Linear(config.hidden_size, self.all_head_size, bias=True)
+        if config.apply_lora and "query" in config.lora_module:
+            if config.lora_type == "frd":
+                self.query_proj = lora.Linear(config.hidden_size, self.all_head_size, r=config.lora_r, 
+                                                lora_alpha=config.lora_alpha, merge_weights=False)
+            elif config.lora_type == "svd": 
+                self.query_proj = lora.SVDLinear(config.hidden_size, self.all_head_size, r=config.lora_r, 
+                                            lora_alpha=config.lora_alpha, merge_weights=False)
+            elif config.lora_type == 'calra':
+                self.query_proj = lora.CALRA(config.hidden_size, self.all_head_size, r=config.lora_r, 
+                                            lora_alpha=config.lora_alpha, merge_weights=False, N=config.num_experts)
+            else:
+                raise ValueError("Unimplemented Lora Type: %s"%config.lora_type)
+        elif 'query' in config.expert_locations:
+            self.query_proj = CooperativeLinear(config.hidden_size, self.all_head_size, config.num_experts, bias=True, use_averaging=config.use_averaging, sample_period=config.sample_period, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy, kl_loss_weight=config.kl_loss_weight, train_cooperative=config.train_cooperative)
+        else:
+            self.query_proj = nn.Linear(config.hidden_size, self.all_head_size, bias=True)
+        if config.apply_lora and "key" in config.lora_module:
+            if config.lora_type == "frd":
+                self.key_proj = lora.Linear(config.hidden_size, self.all_head_size, r=config.lora_r, 
+                                                lora_alpha=config.lora_alpha, merge_weights=False)
+            elif config.lora_type == "svd": 
+                self.key_proj = lora.SVDLinear(config.hidden_size, self.all_head_size, r=config.lora_r, 
+                                            lora_alpha=config.lora_alpha, merge_weights=False)
+            elif config.lora_type == "calra": 
+                self.key_proj = lora.CALRA(config.hidden_size, self.all_head_size, r=config.lora_r, 
+                                            lora_alpha=config.lora_alpha, merge_weights=False, N=config.num_experts)
+            else:
+                raise ValueError("Unimplemented Lora Type: %s"%config.lora_type)
+        elif 'key' in config.expert_locations:
+            self.key_proj = CooperativeLinear(config.hidden_size, self.all_head_size, config.num_experts, bias=True, use_averaging=config.use_averaging, sample_period=config.sample_period, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy, kl_loss_weight=config.kl_loss_weight, train_cooperative=config.train_cooperative)
+        else:
+            self.key_proj = nn.Linear(config.hidden_size, self.all_head_size, bias=True)
 
+        if config.apply_lora and "value" in config.lora_module:
+            if config.lora_type == "frd":
+                self.value_proj = lora.Linear(config.hidden_size, self.all_head_size, r=config.lora_r, 
+                                                lora_alpha=config.lora_alpha, merge_weights=False)
+            elif config.lora_type == "svd": 
+                self.value_proj = lora.SVDLinear(config.hidden_size, self.all_head_size, r=config.lora_r, 
+                                            lora_alpha=config.lora_alpha, merge_weights=False)
+            elif config.lora_type == "calra": 
+                self.value_proj = lora.CALRA(config.hidden_size, self.all_head_size, r=config.lora_r, 
+                                            lora_alpha=config.lora_alpha, merge_weights=False, N=config.num_experts)
+            else:
+                raise ValueError("Unimplemented Lora Type: %s"%config.lora_type)
+        elif 'value' in config.expert_locations:
+            self.value_proj = CooperativeLinear(config.hidden_size, self.all_head_size, config.num_experts, bias=True, use_averaging=config.use_averaging, sample_period=config.sample_period, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy, kl_loss_weight=config.kl_loss_weight, train_cooperative=config.train_cooperative)
+        else:
+            self.value_proj = nn.Linear(config.hidden_size, self.all_head_size, bias=True)
+
+        
         self.share_att_key = getattr(config, "share_att_key", False)
         self.pos_att_type = config.pos_att_type if config.pos_att_type is not None else []
         self.relative_attention = getattr(config, "relative_attention", False)
@@ -678,10 +785,10 @@ class DisentangledSelfAttention(nn.Module):
                 sequence length in which element [i,j] = *1* means the *i* th token in the input can attend to the *j*
                 th token.
 
-            output_attentions (`bool`, *optional*):
+            output_attentions (`bool`, optional):
                 Whether return the attention matrix.
 
-            query_states (`torch.FloatTensor`, *optional*):
+            query_states (`torch.FloatTensor`, optional):
                 The *Q* state in *Attention(Q,K,V)*.
 
             relative_pos (`torch.LongTensor`):
@@ -839,7 +946,7 @@ class DebertaV2Embeddings(nn.Module):
             self.token_type_embeddings = nn.Embedding(config.type_vocab_size, self.embedding_size)
 
         if self.embedding_size != config.hidden_size:
-            self.embed_proj = nn.Linear(self.embedding_size, config.hidden_size, bias=False)
+            self.embed_proj = nn.Linear(self.embedding_size, config.hidden_size, bias=True)
         self.LayerNorm = LayerNorm(config.hidden_size, config.layer_norm_eps)
         self.dropout = StableDropout(config.hidden_dropout_prob)
         self.config = config
@@ -993,6 +1100,7 @@ class DebertaV2Model(DebertaV2PreTrainedModel):
         super().__init__(config)
 
         self.embeddings = DebertaV2Embeddings(config)
+        print("MAKKAKAKAKAKAK ", config.expert_locations)
         self.encoder = DebertaV2Encoder(config)
         self.z_steps = 0
         self.config = config
@@ -1117,7 +1225,6 @@ class DebertaV2ForMaskedLM(DebertaV2PreTrainedModel):
 
     def set_output_embeddings(self, new_embeddings):
         self.cls.predictions.decoder = new_embeddings
-        self.cls.predictions.bias = new_embeddings.bias
 
     @add_start_docstrings_to_model_forward(DEBERTA_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
     @add_code_sample_docstrings(
@@ -1208,14 +1315,11 @@ class DebertaV2LMPredictionHead(nn.Module):
         self.embedding_size = getattr(config, "embedding_size", config.hidden_size)
         # The output weights are the same as the input embeddings, but there is
         # an output-only bias for each token.
-        self.decoder = nn.Linear(self.embedding_size, config.vocab_size, bias=False)
+        self.decoder = nn.Linear(self.embedding_size, config.vocab_size, bias=True)
 
         self.bias = nn.Parameter(torch.zeros(config.vocab_size))
 
         # Need a link between the two variables so that the bias is correctly resized with `resize_token_embeddings`
-        self.decoder.bias = self.bias
-
-    def _tie_weights(self):
         self.decoder.bias = self.bias
 
     def forward(self, hidden_states):

@@ -1,0 +1,17 @@
+CUDA_VISIBLE_DEVICES=2 python finetune.py \
+  --base_model '/home/models/Llama-2-7b-hf' \
+  --data_path 'ft-training_set/math_10k.json' \
+  --output_dir './final_trained_models/math/llama2/lora_A' \
+  --batch_size 4 \
+  --micro_batch_size 4 \
+  --num_epochs 5 \
+  --lora_r 32 \
+  --learning_rate 3e-5 \
+  --cutoff_len 256 \
+  --val_set_size 120 \
+  --adapter_name lora \
+  --save_step 200 \
+  --lora_alpha 64 \
+  --target_modules '[q_proj,k_proj,v_proj]' \
+  --expert_locations 'lora_A' \
+  --load_8bit

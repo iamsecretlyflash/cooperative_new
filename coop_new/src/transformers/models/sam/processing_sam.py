@@ -15,7 +15,6 @@
 """
 Processor class for SAM.
 """
-
 from copy import deepcopy
 from typing import Optional, Union
 

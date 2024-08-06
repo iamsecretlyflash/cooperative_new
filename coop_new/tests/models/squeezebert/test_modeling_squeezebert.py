@@ -37,7 +37,7 @@ if is_torch_available():
     )
 
 
-class SqueezeBertModelTester:
+class SqueezeBertModelTester(object):
     def __init__(
         self,
         parent,

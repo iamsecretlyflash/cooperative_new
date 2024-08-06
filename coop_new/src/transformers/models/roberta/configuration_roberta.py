@@ -13,8 +13,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""RoBERTa configuration"""
-
+""" RoBERTa configuration"""
 from collections import OrderedDict
 from typing import Mapping
 
@@ -24,6 +23,9 @@ from ...utils import logging
 
 
 logger = logging.get_logger(__name__)
+
+
+from ..deprecated._archive_maps import ROBERTA_PRETRAINED_CONFIG_ARCHIVE_MAP  # noqa: F401, E402
 
 
 class RobertaConfig(PretrainedConfig):
@@ -115,11 +117,40 @@ class RobertaConfig(PretrainedConfig):
         eos_token_id=2,
         position_embedding_type="absolute",
         use_cache=True,
+        sparsity=2e-3,
+        apply_lora=False,
+        apply_sparseft=False,
+        reg_sparse_coef=0.0,
+        inp_out_mask_path="None",
+        wt_mask_path="None",
+        lora_type="frd",
+        lora_module="query,value", #query,key,value,intermediate,layer.output,attention.output
+        sparseft_module="query,value", #query,key,value,intermediate,layer.output,attention.output
+        lora_alpha=None,
+        lora_r=None,
+        apply_adapter=False,
+        num_experts=4,
+        adapter_type=None,
+        sparseft_type=0, 
+        adapter_size=None,
+        reg_loss_wgt=0.0,
+        masking_prob=0.0,
+        budget=1000000,
         classifier_dropout=None,
+        expert_locations = "query,key,value,attention.output,intermediate,layer.output", #
+        var_loss_scale = 1e-2,
+        use_entropy = False,
+        sample_period = 1,
+        use_averaging = True,
+        averaging_factor = 0.9,
+        kl_loss_weight = 1,
+        train_cooperative = True,
         **kwargs,
     ):
         super().__init__(pad_token_id=pad_token_id, bos_token_id=bos_token_id, eos_token_id=eos_token_id, **kwargs)
-
+        self.inp_out_mask_path = inp_out_mask_path
+        self.wt_mask_path = wt_mask_path
+        self.reg_sparse_coef = reg_sparse_coef
         self.vocab_size = vocab_size
         self.hidden_size = hidden_size
         self.num_hidden_layers = num_hidden_layers
@@ -131,10 +162,34 @@ class RobertaConfig(PretrainedConfig):
         self.max_position_embeddings = max_position_embeddings
         self.type_vocab_size = type_vocab_size
         self.initializer_range = initializer_range
+        self.num_experts = num_experts
+        self.budget = budget
         self.layer_norm_eps = layer_norm_eps
         self.position_embedding_type = position_embedding_type
         self.use_cache = use_cache
+        self.apply_lora = apply_lora
+        self.apply_sparseft = apply_sparseft
+        self.sparseft_module = sparseft_module
+        self.lora_type = lora_type
+        self.lora_module = lora_module 
+        self.lora_alpha = lora_alpha
+        self.lora_r = lora_r
+        self.apply_adapter = apply_adapter
+        self.adapter_type = adapter_type
+        self.adapter_size = adapter_size
+        self.sparseft_type = sparseft_type
+        self.reg_loss_wgt = reg_loss_wgt
+        self.masking_prob = masking_prob
+        self.sparsity = sparsity
         self.classifier_dropout = classifier_dropout
+        self.expert_locations = expert_locations
+        self.var_loss_scale = var_loss_scale
+        self.use_entropy = use_entropy
+        self.sample_period = sample_period
+        self.use_averaging = use_averaging
+        self.averaging_factor = averaging_factor
+        self.kl_loss_weight = kl_loss_weight
+        self.train_cooperative = train_cooperative
 
 
 class RobertaOnnxConfig(OnnxConfig):

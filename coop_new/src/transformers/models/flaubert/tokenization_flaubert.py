@@ -14,6 +14,7 @@
 # limitations under the License.
 """Tokenization classes for Flaubert."""
 
+
 import json
 import os
 import re
@@ -246,7 +247,6 @@ class FlaubertTokenizer(PreTrainedTokenizer):
         self.cache = {}
 
         super().__init__(
-            do_lowercase=do_lowercase,
             unk_token=unk_token,
             bos_token=bos_token,
             sep_token=sep_token,

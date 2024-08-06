@@ -506,16 +506,12 @@ class RagModel(RagPreTrainedModel):
         if question_encoder is None:
             from ..auto.modeling_auto import AutoModel
 
-            question_encoder = AutoModel.from_config(
-                config.question_encoder, attn_implementation=config._attn_implementation
-            )
+            question_encoder = AutoModel.from_config(config.question_encoder)
 
         if generator is None:
             from ..auto.modeling_auto import AutoModelForSeq2SeqLM
 
-            generator = AutoModelForSeq2SeqLM.from_config(
-                config.generator, attn_implementation=config._attn_implementation
-            )
+            generator = AutoModelForSeq2SeqLM.from_config(config.generator)
 
         self.retriever = retriever
         if self.retriever is not None:
@@ -792,7 +788,7 @@ class RagSequenceForGeneration(RagPreTrainedModel):
         reduce_loss (`bool`, *optional*):
             Only relevant if `labels` is passed. If `True`, the NLL loss is reduced using the `torch.Tensor.sum`
             operation.
-        kwargs (`Dict[str, any]`, *optional*, defaults to `{}`):
+        kwargs (`Dict[str, any]`, optional, defaults to *{}*):
              Legacy dictionary, which is required so that model can use *generate()* function.
 
         Returns:
@@ -1261,7 +1257,7 @@ class RagTokenForGeneration(RagPreTrainedModel):
         reduce_loss (`bool`, *optional*):
             Only relevant if `labels` is passed. If `True`, the NLL loss is reduced using the `torch.Tensor.sum`
             operation.
-        kwargs (`Dict[str, any]`, *optional*, defaults to `{}`):
+        kwargs (`Dict[str, any]`, optional, defaults to *{}*):
             Legacy dictionary, which is required so that model can use *generate()* function.
 
         Returns:
@@ -1458,9 +1454,6 @@ class RagTokenForGeneration(RagPreTrainedModel):
         generation_config = copy.deepcopy(generation_config)
         model_kwargs = generation_config.update(**kwargs)  # All unused kwargs must be model kwargs
 
-        kwargs_has_attention_mask = model_kwargs.get("attention_mask", None) is not None
-        self._prepare_special_tokens(generation_config, kwargs_has_attention_mask)
-
         # set default parameters
         n_docs = n_docs if n_docs is not None else self.config.n_docs
 
@@ -1538,11 +1531,6 @@ class RagTokenForGeneration(RagPreTrainedModel):
             encoder_input_ids=context_input_ids,
             prefix_allowed_tokens_fn=prefix_allowed_tokens_fn,
             logits_processor=logits_processor,
-            device=input_ids.device,
-        )
-
-        prepared_stopping_criteria = self._get_stopping_criteria(
-            generation_config=generation_config, stopping_criteria=stopping_criteria
         )
 
         if generation_config.num_beams == 1:
@@ -1551,14 +1539,12 @@ class RagTokenForGeneration(RagPreTrainedModel):
                     f"num_return_sequences has to be 1, but is {generation_config.num_return_sequences} when doing"
                     " greedy search."
                 )
-            return self._sample(
+            return self._greedy_search(
                 input_ids,
                 logits_processor=pre_processor,
-                stopping_criteria=prepared_stopping_criteria,
-                generation_config=generation_config,
-                synced_gpus=False,
-                streamer=None,
-                logits_warper=None,
+                max_length=generation_config.max_length,
+                pad_token_id=generation_config.pad_token_id,
+                eos_token_id=generation_config.eos_token_id,
                 **model_kwargs,
             )
         elif generation_config.num_beams > 1:
@@ -1577,10 +1563,9 @@ class RagTokenForGeneration(RagPreTrainedModel):
                 input_ids,
                 beam_scorer,
                 logits_processor=pre_processor,
-                stopping_criteria=prepared_stopping_criteria,
-                generation_config=generation_config,
-                synced_gpus=False,
-                logits_warper=None,
+                max_length=generation_config.max_length,
+                pad_token_id=generation_config.pad_token_id,
+                eos_token_id=generation_config.eos_token_id,
                 **model_kwargs,
             )
         else:

@@ -12,7 +12,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Testing suite for the PyTorch EfficientNet model."""
+""" Testing suite for the PyTorch EfficientNet model. """
+
 
 import unittest
 
@@ -142,22 +143,27 @@ class EfficientNetModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.Test
     def setUp(self):
         self.model_tester = EfficientNetModelTester(self)
         self.config_tester = ConfigTester(
-            self,
-            config_class=EfficientNetConfig,
-            has_text_modality=False,
-            hidden_size=37,
-            common_properties=["num_channels", "image_size", "hidden_dim"],
+            self, config_class=EfficientNetConfig, has_text_modality=False, hidden_size=37
         )
 
     def test_config(self):
-        self.config_tester.run_common_tests()
+        self.create_and_test_config_common_properties()
+        self.config_tester.create_and_test_config_to_json_string()
+        self.config_tester.create_and_test_config_to_json_file()
+        self.config_tester.create_and_test_config_from_and_save_pretrained()
+        self.config_tester.create_and_test_config_with_num_labels()
+        self.config_tester.check_config_can_be_init_without_params()
+        self.config_tester.check_config_arguments_init()
+
+    def create_and_test_config_common_properties(self):
+        return
 
     @unittest.skip(reason="EfficientNet does not use inputs_embeds")
     def test_inputs_embeds(self):
         pass
 
     @unittest.skip(reason="EfficientNet does not support input and output embeddings")
-    def test_model_get_set_embeddings(self):
+    def test_model_common_attributes(self):
         pass
 
     @unittest.skip(reason="EfficientNet does not use feedforward chunking")
@@ -214,12 +220,6 @@ class EfficientNetModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.Test
     @slow
     def test_pipeline_image_feature_extraction(self):
         super().test_pipeline_image_feature_extraction()
-
-    @is_pipeline_test
-    @require_vision
-    @slow
-    def test_pipeline_image_feature_extraction_fp16(self):
-        super().test_pipeline_image_feature_extraction_fp16()
 
     @is_pipeline_test
     @require_vision

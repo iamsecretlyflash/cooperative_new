@@ -14,6 +14,7 @@
 # limitations under the License.
 """Convert ViLT checkpoints from the original Github repository."""
 
+
 import argparse
 import json
 from pathlib import Path

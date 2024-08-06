@@ -12,7 +12,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""PyTorch T5 model."""
+""" PyTorch T5 model."""
+
 
 import copy
 import math
@@ -22,6 +23,7 @@ from typing import List, Optional, Tuple, Union
 
 import torch
 from torch import nn
+import torch.nn.functional as F
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 
 from ...activations import ACT2FN
@@ -35,7 +37,7 @@ from ...modeling_outputs import (
     TokenClassifierOutput,
 )
 from ...modeling_utils import PreTrainedModel
-from ...pytorch_utils import ALL_LAYERNORM_LAYERS, find_pruneable_heads_and_indices, prune_linear_layer
+from ...pytorch_utils import ALL_LAYERNORM_LAYERS, find_pruneable_heads_and_indices, prune_linear_layer, CooperativeLinear
 from ...utils import (
     DUMMY_INPUTS,
     DUMMY_MASK,
@@ -48,6 +50,9 @@ from ...utils import (
 from ...utils.model_parallel_utils import assert_device_map, get_device_map
 from .configuration_t5 import T5Config
 
+from torch.distributions.multivariate_normal import MultivariateNormal
+
+from copy import deepcopy as cp
 
 logger = logging.get_logger(__name__)
 
@@ -59,7 +64,91 @@ _CHECKPOINT_FOR_DOC = "google-t5/t5-small"
 # for the pretrained weights provided with the models
 ####################################################
 
+from ..deprecated._archive_maps import T5_PRETRAINED_MODEL_ARCHIVE_LIST  # noqa: F401, E402
 
+# class CooperativeLinear(nn.Linear):
+#     def __init__(
+#         self, 
+#         in_features: int, 
+#         out_features: int, 
+#         num_experts: int,
+#         fan_in_fan_out : bool = False, 
+#         log_variance_init = -10,
+#         single_variance = False,
+#         var_loss_scale = 1e-7,
+#         use_entropy = False,
+#         **kwargs
+#     ):
+#         self.num_experts = num_experts
+#         self.in_features = in_features
+#         self.out_features = out_features
+#         self.fan_in_fan_out = fan_in_fan_out
+#         self.var_loss_scale = var_loss_scale
+#         self.use_entropy = use_entropy
+#         self.log_constant = 1e-8
+        
+#         nn.Linear.__init__(self, in_features, out_features, **kwargs)
+
+#         self.scale = 1 #nn.Parameter(torch.ones(1))
+#         self.cons_scale = 1
+#         self.single_variance = single_variance
+#         if not single_variance:
+#             self.logvar = nn.Parameter((0.5 + torch.rand(num_experts,out_features)/2)*(log_variance_init))
+#         else:
+#             self.logvar = nn.Parameter((0.5 + torch.rand(out_features)/2)*(log_variance_init))
+#         self.expert_weights = nn.Parameter(torch.rand(num_experts))
+#         self.softmax = nn.Softmax()
+#         #self.weight.requires_grad = False   
+
+#     def forward(self, x):        
+#         mu = cp(self.weight.data)
+
+#         if self.fan_in_fan_out == False:
+#             mu = mu.T
+
+#         #var = torch.matmul(self.logvar, self.logvar.T) * self.scale.to(x.device) * self.cons_scale
+#         if self.single_variance:
+#             var = torch.diag(self.logvar.exp() * self.scale* self.cons_scale).to(x.device) 
+#         else:
+#             var = torch.stack([torch.diag(i.exp()* self.scale) for i in self.logvar]).to(x.device)
+#         sampler = MultivariateNormal(torch.zeros(self.out_features).to(x.device), torch.eye(self.out_features).to(x.device))
+#         all_vars = sampler.sample((self.num_experts, self.in_features)).to(x.device)
+#         all_vars = all_vars @ var
+
+#         all_vars += mu
+#         expert_weights = self.softmax(self.expert_weights)
+
+#         #print (expert_weights)
+
+#         var_param = torch.einsum('i,ijk->jk', expert_weights, all_vars)
+#         var_param = torch.nan_to_num(var_param, nan=0.0)
+                         
+#         #print (self.weight.data.shape, mu.shape, var_param.shape)
+#         #if self.fan_in_fan_out == False:
+#         #    main_result = F.linear(x, self.weight.data.T, bias=self.bias)
+#         #else:
+#         #    main_result = F.linear(x, self.weight.data, bias=self.bias)
+
+#         if self.fan_in_fan_out == False:
+#             res = F.linear(x, var_param.T, self.bias) 
+#         else:
+#             res = F.linear(x, var_param, self.bias)
+
+#         if torch.isnan(var_param).max() == True:
+#             print ("variance", var)
+#             print ("param", var_param)
+#             print ("out", res)
+
+#         return res
+    
+#     def get_variational_loss(self):
+#         loss = ((2 * self.logvar.sum() - self.logvar.exp().square().sum()) * self.expert_weights.sum())
+#         if self.use_entropy:
+#             expert_weight_loss = nn.Softmax()(self.expert_weights)
+#             expert_weight_loss = (expert_weight_loss * expert_weight_loss.log() ).sum()
+#             loss += expert_weight_loss
+#         return self.var_loss_scale * loss
+    
 ####################################################
 # This is a conversion method from TF 1.0 to PyTorch
 # More details: https://medium.com/huggingface/from-tensorflow-to-pytorch-265f40ef2a28
@@ -181,7 +270,7 @@ PARALLELIZE_DOCSTRING = r"""
     it will evenly distribute blocks across all devices.
 
     Args:
-        device_map (`Dict[int, list]`, *optional*):
+        device_map (`Dict[int, list]`, optional, defaults to None):
             A dictionary that maps attention modules to devices. Note that the embedding module and LMHead are always
             automatically mapped to the first device (for esoteric reasons). That means that the first device should
             have fewer attention modules mapped to it than other devices. For reference, the t5 models have the
@@ -271,8 +360,14 @@ ALL_LAYERNORM_LAYERS.append(T5LayerNorm)
 class T5DenseActDense(nn.Module):
     def __init__(self, config: T5Config):
         super().__init__()
-        self.wi = nn.Linear(config.d_model, config.d_ff, bias=False)
-        self.wo = nn.Linear(config.d_ff, config.d_model, bias=False)
+        if 'intermediate' in config.expert_locations:
+            self.wi = CooperativeLinear(config.d_model, config.d_ff, config.num_experts, bias=False, log_variance_init=config.log_variance_init, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy)
+        else:
+            self.wi = nn.Linear(config.d_model, config.d_ff, bias=False)
+        if 'output' in config.expert_locations:
+            self.wo = CooperativeLinear(config.d_ff, config.d_model, config.num_experts, bias=False, log_variance_init=config.log_variance_init, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy)
+        else:
+            self.wo = nn.Linear(config.d_ff, config.d_model, bias=False)
         self.dropout = nn.Dropout(config.dropout_rate)
         self.act = ACT2FN[config.dense_act_fn]
 
@@ -293,9 +388,18 @@ class T5DenseActDense(nn.Module):
 class T5DenseGatedActDense(nn.Module):
     def __init__(self, config: T5Config):
         super().__init__()
-        self.wi_0 = nn.Linear(config.d_model, config.d_ff, bias=False)
-        self.wi_1 = nn.Linear(config.d_model, config.d_ff, bias=False)
-        self.wo = nn.Linear(config.d_ff, config.d_model, bias=False)
+        if 'intermediate' in config.expert_locations:
+            self.wi_0 = CooperativeLinear(config.d_model, config.d_ff, config.num_experts, bias=False, log_variance_init=config.log_variance_init, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy)
+        else:
+            self.wi_0 = nn.Linear(config.d_model, config.d_ff, bias=False)
+        if 'intermediate' in config.expert_locations:
+            self.wi_1 = CooperativeLinear(config.d_model, config.d_ff, config.num_experts, bias=False, log_variance_init=config.log_variance_init, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy)
+        else:
+            self.wi_1 = nn.Linear(config.d_model, config.d_ff, bias=False)
+        if 'output' in config.expert_locations:
+            self.wo = CooperativeLinear(config.d_ff, config.d_model, config.num_experts, bias=False, log_variance_init=config.log_variance_init, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy)
+        else:
+            self.wo = nn.Linear(config.d_ff, config.d_model, bias=False)
         self.dropout = nn.Dropout(config.dropout_rate)
         self.act = ACT2FN[config.dense_act_fn]
 
@@ -351,10 +455,22 @@ class T5Attention(nn.Module):
         self.inner_dim = self.n_heads * self.key_value_proj_dim
 
         # Mesh TensorFlow initialization to avoid scaling before softmax
-        self.q = nn.Linear(self.d_model, self.inner_dim, bias=False)
-        self.k = nn.Linear(self.d_model, self.inner_dim, bias=False)
-        self.v = nn.Linear(self.d_model, self.inner_dim, bias=False)
-        self.o = nn.Linear(self.inner_dim, self.d_model, bias=False)
+        if 'query' in config.expert_locations:  
+            self.q = CooperativeLinear(self.d_model, self.inner_dim, config.num_experts, bias=False, log_variance_init=config.log_variance_init, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy)
+        else:
+            self.q = nn.Linear(self.d_model, self.inner_dim, bias=False)
+        if 'key' in config.expert_locations:  
+            self.k = CooperativeLinear(self.d_model, self.inner_dim, config.num_experts, bias=False, log_variance_init=config.log_variance_init, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy)
+        else:
+            self.k = nn.Linear(self.d_model, self.inner_dim, bias=False)
+        if 'value' in config.expert_locations:  
+            self.v = CooperativeLinear(self.d_model, self.inner_dim, config.num_experts, bias=False, log_variance_init=config.log_variance_init, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy)
+        else:
+            self.v = nn.Linear(self.d_model, self.inner_dim, bias=False)
+        if 'attention_out' in config.expert_locations:  
+            self.o = CooperativeLinear(self.inner_dim, self.d_model, config.num_experts, bias=False, log_variance_init=config.log_variance_init, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy)
+        else:
+            self.o = nn.Linear(self.inner_dim, self.d_model, bias=False)
 
         if self.has_relative_attention_bias:
             self.relative_attention_bias = nn.Embedding(self.relative_attention_num_buckets, self.n_heads)

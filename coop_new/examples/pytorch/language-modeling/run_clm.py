@@ -25,10 +25,12 @@ import logging
 import math
 import os
 import sys
+import warnings
 from dataclasses import dataclass, field
 from itertools import chain
 from typing import Optional
 
+import numpy as np
 import datasets
 import evaluate
 import torch
@@ -55,9 +57,9 @@ from transformers.utils.versions import require_version
 
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
-check_min_version("4.44.0.dev0")
+check_min_version("4.40.0.dev0")
 
-require_version("datasets>=2.14.0", "To fix: pip install -r examples/pytorch/language-modeling/requirements.txt")
+require_version("datasets>=1.8.0", "To fix: pip install -r examples/pytorch/language-modeling/requirements.txt")
 
 logger = logging.getLogger(__name__)
 
@@ -120,13 +122,19 @@ class ModelArguments:
             )
         },
     )
+    use_auth_token: bool = field(
+        default=None,
+        metadata={
+            "help": "The `use_auth_token` argument is deprecated and will be removed in v4.34. Please use `token` instead."
+        },
+    )
     trust_remote_code: bool = field(
         default=False,
         metadata={
             "help": (
-                "Whether to trust the execution of code from datasets/models defined on the Hub."
-                " This option should only be set to `True` for repositories you trust and in which you have read the"
-                " code, as it will execute code present on the Hub on your local machine."
+                "Whether or not to allow for custom models defined on the Hub in their own modeling files. This option "
+                "should only be set to `True` for repositories you trust and in which you have read the code, as it will "
+                "execute code present on the Hub on your local machine."
             )
         },
     )
@@ -149,7 +157,40 @@ class ModelArguments:
             )
         },
     )
+    freeze_base: Optional[bool] = field(
+        default=False,
+        metadata={"help": "To freeze the weights of the base model"},
+    )
+    expert_locations: Optional[str] = field(
+        default="query,key,value,attention_out,intermediate,output",
+        metadata={"help": "The modules applying cooperative"},
+    )
+    sparseft_module: Optional[str] = field(
+        default="query,value",
+        metadata={"help": "The modules applying sparseft: query,key,value,intermediate,layer.output,attention.output"},
+    )
+    
+    num_experts : Optional[int] = field(
+        default=4,
+        metadata={"help": "number of experts"}
+    )
 
+    log_variance_init : Optional[float] = field(
+        default=-10,
+        metadata={"help": "Constant for initialising log variance"}
+    )
+    single_variance : Optional[bool] = field(
+        default = False,
+        metadata={"help": "To toggle between using single variance for all experts or unique variances"}
+    )
+    var_loss_scale : Optional[float] = field(
+        default=1e-7,
+        metadata={"help": "scaling constant for variational loss"}
+    )
+    use_entropy : Optional[bool] = field(
+        default=False,
+        metadata={"help": "Use Entropy Loss or Not"}
+    )
     def __post_init__(self):
         if self.config_overrides is not None and (self.config_name is not None or self.model_name_or_path is not None):
             raise ValueError(
@@ -248,6 +289,15 @@ def main():
     else:
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
+    if model_args.use_auth_token is not None:
+        warnings.warn(
+            "The `use_auth_token` argument is deprecated and will be removed in v4.34. Please use `token` instead.",
+            FutureWarning,
+        )
+        if model_args.token is not None:
+            raise ValueError("`token` and `use_auth_token` are both specified. Please set only the argument `token`.")
+        model_args.token = model_args.use_auth_token
+
     # Sending telemetry. Tracking the example usage helps us better allocate resources to maintain them. The
     # information sent is the one passed as arguments along with your Python/PyTorch versions.
     send_example_telemetry("run_clm", model_args, data_args)
@@ -312,8 +362,11 @@ def main():
             cache_dir=model_args.cache_dir,
             token=model_args.token,
             streaming=data_args.streaming,
-            trust_remote_code=model_args.trust_remote_code,
         )
+        
+        if 'test' in raw_datasets.keys():
+            raw_datasets['validation'] = raw_datasets['test']
+
         if "validation" not in raw_datasets.keys():
             raw_datasets["validation"] = load_dataset(
                 data_args.dataset_name,
@@ -322,7 +375,6 @@ def main():
                 cache_dir=model_args.cache_dir,
                 token=model_args.token,
                 streaming=data_args.streaming,
-                trust_remote_code=model_args.trust_remote_code,
             )
             raw_datasets["train"] = load_dataset(
                 data_args.dataset_name,
@@ -331,7 +383,6 @@ def main():
                 cache_dir=model_args.cache_dir,
                 token=model_args.token,
                 streaming=data_args.streaming,
-                trust_remote_code=model_args.trust_remote_code,
             )
     else:
         data_files = {}
@@ -390,9 +441,21 @@ def main():
         "trust_remote_code": model_args.trust_remote_code,
     }
     if model_args.config_name:
-        config = AutoConfig.from_pretrained(model_args.config_name, **config_kwargs)
+        config = AutoConfig.from_pretrained(model_args.config_name, expert_locations=model_args.expert_locations,
+        num_experts=model_args.num_experts,
+        log_variance_init = model_args.log_variance_init,
+        single_variance = model_args.single_variance,
+        var_loss_scale = model_args.var_loss_scale,
+        use_entropy = model_args.use_entropy,
+        freeze_base = model_args.freeze_base, **config_kwargs)
     elif model_args.model_name_or_path:
-        config = AutoConfig.from_pretrained(model_args.model_name_or_path, **config_kwargs)
+        config = AutoConfig.from_pretrained(model_args.model_name_or_path, expert_locations=model_args.expert_locations,
+        num_experts=model_args.num_experts,
+        log_variance_init = model_args.log_variance_init,
+        single_variance = model_args.single_variance,
+        var_loss_scale = model_args.var_loss_scale,
+        use_entropy = model_args.use_entropy,
+        freeze_base = model_args.freeze_base, **config_kwargs)
     else:
         config = CONFIG_MAPPING[model_args.model_type]()
         logger.warning("You are instantiating a new config instance from scratch.")
@@ -439,6 +502,12 @@ def main():
         model = AutoModelForCausalLM.from_config(config, trust_remote_code=model_args.trust_remote_code)
         n_params = sum({p.data_ptr(): p.numel() for p in model.parameters()}.values())
         logger.info(f"Training new model from scratch - Total size={n_params/2**20:.2f}M params")
+
+    if model.config.freeze_base:
+        for n, p in model.named_parameters():
+            if 'logvar' not in n and 'expert' not in n:
+                if 'atten' in n.lower() or 'norm' in n.lower() or 'weight' in n.lower():
+                    p.requires_grad = False
 
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
     # on a small vocab and want a smaller embedding size, remove this test.
@@ -570,15 +639,31 @@ def main():
                 logits = logits[0]
             return logits.argmax(dim=-1)
 
-        metric = evaluate.load("accuracy", cache_dir=model_args.cache_dir)
+        #metric = evaluate.load("accuracy", cache_dir=model_args.cache_dir)
 
-        def compute_metrics(eval_preds):
+        #def compute_metrics(eval_preds):
+        #    preds, labels = eval_preds
+        #    # preds have the same shape as the labels, after the argmax(-1) has been calculated
+        #    # by preprocess_logits_for_metrics but we need to shift the labels
+        #    labels = labels[:, 1:].reshape(-1)
+        #    preds = preds[:, :-1].reshape(-1)
+        #    return metric.compute(predictions=preds, references=labels)
+
+        metric = evaluate.load("bleu", cache_dir=model_args.cache_dir)
+
+        def compute_metrics(eval_preds, n_gram=2):
             preds, labels = eval_preds
             # preds have the same shape as the labels, after the argmax(-1) has been calculated
             # by preprocess_logits_for_metrics but we need to shift the labels
-            labels = labels[:, 1:].reshape(-1)
-            preds = preds[:, :-1].reshape(-1)
-            return metric.compute(predictions=preds, references=labels)
+            labels = labels[:, 1:]
+            preds = preds[:, :-1]
+            scores = []
+            for i in range(preds.shape[0]):
+                predictions = [tokenizer.decode(preds[i])]
+                references = [tokenizer.decode(labels[i])]
+                scores.append(metric.compute(predictions=predictions, references=references, max_order=n_gram)['bleu'])
+            
+            return {'bleu-{}'.format(n_gram): np.mean(scores)}
 
     # Initialize our Trainer
     trainer = Trainer(

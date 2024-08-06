@@ -60,9 +60,7 @@ class QuantoHfQuantizer(HfQuantizer):
         if not is_quanto_available():
             raise ImportError("Loading a quanto quantized model requires quanto library (`pip install quanto`)")
         if not is_accelerate_available():
-            raise ImportError(
-                "Loading a quanto quantized model requires accelerate library (`pip install accelerate`)"
-            )
+            raise ImportError("Loading a quanto quantized model requires accelerate library (`pip install quanto`)")
 
     def update_device_map(self, device_map):
         if device_map is None:

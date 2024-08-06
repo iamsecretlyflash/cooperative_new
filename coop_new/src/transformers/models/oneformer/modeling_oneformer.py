@@ -12,8 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""PyTorch OneFormer model."""
-
+""" PyTorch OneFormer model."""
 import copy
 import math
 import warnings
@@ -51,6 +50,9 @@ logger = logging.get_logger(__name__)
 
 _CONFIG_FOR_DOC = "OneFormerConfig"
 _CHECKPOINT_FOR_DOC = "shi-labs/oneformer_ade20k_swin_tiny"
+
+
+from ..deprecated._archive_maps import ONEFORMER_PRETRAINED_MODEL_ARCHIVE_LIST  # noqa: F401, E402
 
 
 if is_scipy_available():

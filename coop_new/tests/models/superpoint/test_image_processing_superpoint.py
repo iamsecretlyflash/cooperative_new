@@ -77,7 +77,6 @@ class SuperPointImageProcessingTest(ImageProcessingTestMixin, unittest.TestCase)
     image_processing_class = SuperPointImageProcessor if is_vision_available() else None
 
     def setUp(self) -> None:
-        super().setUp()
         self.image_processor_tester = SuperPointImageProcessingTester(self)
 
     @property

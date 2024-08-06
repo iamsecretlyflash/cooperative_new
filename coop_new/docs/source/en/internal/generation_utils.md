@@ -167,9 +167,6 @@ generation.
 [[autodoc]] MinNewTokensLengthLogitsProcessor
     - __call__
 
-[[autodoc]] MinPLogitsWarper
-    - __call__
-
 [[autodoc]] NoBadWordsLogitsProcessor
     - __call__
 
@@ -208,10 +205,6 @@ generation.
 
 [[autodoc]] WhisperTimeStampLogitsProcessor
     - __call__
-
-[[autodoc]] WatermarkLogitsProcessor
-    - __call__
-
 
 ### TensorFlow
 
@@ -317,12 +310,6 @@ A [`StoppingCriteria`] can be used to change when to stop generation (other than
 [[autodoc]] MaxTimeCriteria
     - __call__
 
-[[autodoc]] StopStringCriteria
-    - __call__
-
-[[autodoc]] EosTokenCriteria
-    - __call__
-
 ## Constraints
 
 A [`Constraint`] can be used to force the generation to include specific tokens or sequences in the output. Please note that this is exclusively available to our PyTorch implementations.
@@ -360,26 +347,12 @@ A [`Constraint`] can be used to force the generation to include specific tokens 
 [[autodoc]] Cache
     - update
 
-[[autodoc]] CacheConfig
-	- update
-
-[[autodoc]] QuantizedCacheConfig
-	- validate
-
 [[autodoc]] DynamicCache
     - update
     - get_seq_length
     - reorder_cache
     - to_legacy_cache
     - from_legacy_cache
-
-[[autodoc]] QuantizedCache
-    - update
-    - get_seq_length
-
-[[autodoc]] QuantoQuantizedCache
-
-[[autodoc]] HQQQuantizedCache
 
 [[autodoc]] SinkCache
     - update
@@ -389,17 +362,3 @@ A [`Constraint`] can be used to force the generation to include specific tokens 
 [[autodoc]] StaticCache
     - update
     - get_seq_length
-    - reset
-
-[[autodoc]] EncoderDecoderCache
-    - get_seq_length
-    - to_legacy_cache
-    - from_legacy_cache
-    - reset
-    - reorder_cache
-
-## Watermark Utils
-
-[[autodoc]] WatermarkDetector
-    - __call__
-

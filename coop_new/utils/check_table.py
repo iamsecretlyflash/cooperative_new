@@ -31,7 +31,6 @@ python utils/check_inits.py --fix_and_overwrite
 
 which is used by `make fix-copies`.
 """
-
 import argparse
 import collections
 import os
@@ -156,7 +155,6 @@ MODEL_NAMES_WITH_SAME_CONFIG = {
     "HerBERT": "BERT",
     "LayoutXLM": "LayoutLMv2",
     "Llama2": "LLaMA",
-    "Llama3": "LLaMA",
     "MADLAD-400": "T5",
     "MatCha": "Pix2Struct",
     "mBART-50": "mBART",

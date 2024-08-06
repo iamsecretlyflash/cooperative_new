@@ -37,7 +37,7 @@ if is_tf_available():
     )
 
 
-class TFCTRLModelTester:
+class TFCTRLModelTester(object):
     def __init__(
         self,
         parent,

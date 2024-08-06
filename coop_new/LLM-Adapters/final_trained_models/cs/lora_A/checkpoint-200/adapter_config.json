@@ -1,0 +1,28 @@
+{
+  "base_model_name_or_path": "/home/models/Llama-2-7b-hf",
+  "bias": "none",
+  "cooperative_modules": "lora_A",
+  "enable_lora": null,
+  "expert_locations": "q,k,v,ao,i,o",
+  "fan_in_fan_out": false,
+  "inference_mode": true,
+  "kl_loss_weight": 1,
+  "lora_alpha": 32,
+  "lora_dropout": 0.05,
+  "merge_weights": false,
+  "modules_to_save": null,
+  "num_experts": 4,
+  "peft_type": "LORA",
+  "r": 32,
+  "sample_period": 1,
+  "target_modules": [
+    "q_proj",
+    "k_proj",
+    "v_proj"
+  ],
+  "task_type": "CAUSAL_LM",
+  "train_cooperative": true,
+  "use_averaging": false,
+  "use_entropy": false,
+  "var_loss_scale": 0.005
+}

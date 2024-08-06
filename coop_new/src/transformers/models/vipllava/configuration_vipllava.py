@@ -11,7 +11,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""VipLlava model configuration"""
+""" VipLlava model configuration"""
+
+import warnings
 
 from ...configuration_utils import PretrainedConfig
 from ...utils import logging
@@ -19,6 +21,9 @@ from ..auto import CONFIG_MAPPING
 
 
 logger = logging.get_logger(__name__)
+
+
+from ..deprecated._archive_maps import VIPLLAVA_PRETRAINED_CONFIG_ARCHIVE_MAP  # noqa: F401, E402
 
 
 class VipLlavaConfig(PretrainedConfig):
@@ -88,6 +93,13 @@ class VipLlavaConfig(PretrainedConfig):
         self.projector_hidden_act = projector_hidden_act
         self.projector_layernorm_eps = projector_layernorm_eps
         self.vision_feature_layers = vision_feature_layers
+
+        if "vocab_size" in kwargs:
+            warnings.warn(
+                "The `vocab_size` argument is deprecated and will be removed in v4.42, since it can be inferred from the `text_config`. Passing this argument has no effect",
+                FutureWarning,
+            )
+
         self.vision_config = vision_config
 
         if isinstance(self.vision_config, dict):
@@ -114,5 +126,19 @@ class VipLlavaConfig(PretrainedConfig):
             text_config = CONFIG_MAPPING["llama"]()
 
         self.text_config = text_config
+        self._vocab_size = self.text_config.vocab_size
 
         super().__init__(**kwargs)
+
+        @property
+        def vocab_size(self):
+            warnings.warn(
+                "The `vocab_size` attribute is deprecated and will be removed in v4.42, Please use `text_config.vocab_size` instead.",
+                FutureWarning,
+            )
+            return self._vocab_size
+
+        def to_dict(self):
+            output = super().to_dict()
+            output.pop("_vocab_size", None)
+            return output

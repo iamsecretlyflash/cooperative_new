@@ -13,7 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Convert Musicgen Melody checkpoints from the original repository."""
-
 import argparse
 from pathlib import Path
 from typing import Dict, OrderedDict, Tuple

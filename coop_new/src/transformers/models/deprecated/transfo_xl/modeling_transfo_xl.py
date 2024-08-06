@@ -14,10 +14,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-PyTorch Transformer XL model. Adapted from https://github.com/kimiyoung/transformer-xl. In particular
-https://github.com/kimiyoung/transformer-xl/blob/master/pytorch/mem_transformer.py
+ PyTorch Transformer XL model. Adapted from https://github.com/kimiyoung/transformer-xl. In particular
+ https://github.com/kimiyoung/transformer-xl/blob/master/pytorch/mem_transformer.py
 """
-
 import warnings
 from dataclasses import dataclass
 from typing import List, Optional, Tuple, Union
@@ -42,6 +41,9 @@ logger = logging.get_logger(__name__)
 
 _CHECKPOINT_FOR_DOC = "transfo-xl/transfo-xl-wt103"
 _CONFIG_FOR_DOC = "TransfoXLConfig"
+
+
+from .._archive_maps import TRANSFO_XL_PRETRAINED_MODEL_ARCHIVE_LIST  # noqa: F401, E402
 
 
 def build_tf_to_pytorch_map(model, config):
@@ -1251,7 +1253,7 @@ class TransfoXLForSequenceClassification(TransfoXLPreTrainedModel):
                 sequence_lengths = sequence_lengths.to(logits.device)
             else:
                 sequence_lengths = -1
-                logger.warning_once(
+                logger.warning(
                     f"{self.__class__.__name__} will not detect padding tokens in `inputs_embeds`. Results may be "
                     "unexpected if using padding tokens in conjunction with `inputs_embeds.`"
                 )

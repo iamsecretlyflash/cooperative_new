@@ -13,8 +13,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""OpenAI GPT-2 configuration"""
-
+""" OpenAI GPT-2 configuration"""
 from collections import OrderedDict
 from typing import Any, List, Mapping, Optional
 
@@ -25,6 +24,9 @@ from ...utils import logging
 
 
 logger = logging.get_logger(__name__)
+
+
+from ..deprecated._archive_maps import GPT2_PRETRAINED_CONFIG_ARCHIVE_MAP  # noqa: F401, E402
 
 
 class GPT2Config(PretrainedConfig):
@@ -159,6 +161,16 @@ class GPT2Config(PretrainedConfig):
         eos_token_id=50256,
         scale_attn_by_inverse_layer_idx=False,
         reorder_and_upcast_attn=False,
+        expert_locations = "query,key,value,attention_out,intermediate,output", #
+        num_experts = 4, #4
+        log_variance_init = -10,
+        single_variance = False,
+        var_loss_scale = 1e-6,
+        use_entropy = False,
+        freeze_base = True,
+        weight_normalization = 'Softmax',
+        expert_weight_init = -1,
+        inference_mixing_coeff = 1,
         **kwargs,
     ):
         self.vocab_size = vocab_size
@@ -182,6 +194,16 @@ class GPT2Config(PretrainedConfig):
         self.use_cache = use_cache
         self.scale_attn_by_inverse_layer_idx = scale_attn_by_inverse_layer_idx
         self.reorder_and_upcast_attn = reorder_and_upcast_attn
+        self.expert_locations = expert_locations
+        self.num_experts = num_experts
+        self.log_variance_init = log_variance_init
+        self.single_variance = single_variance
+        self.var_loss_scale = var_loss_scale
+        self.use_entropy = use_entropy
+        self.freeze_base = freeze_base
+        self.weight_normalization = weight_normalization
+        self.expert_weight_init = expert_weight_init
+        self.inference_mixing_coeff = inference_mixing_coeff
 
         self.bos_token_id = bos_token_id
         self.eos_token_id = eos_token_id

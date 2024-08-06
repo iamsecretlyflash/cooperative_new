@@ -17,6 +17,7 @@
 URL: https://github.com/baaivision/Painter/tree/main/SegGPT
 """
 
+
 import argparse
 
 import requests

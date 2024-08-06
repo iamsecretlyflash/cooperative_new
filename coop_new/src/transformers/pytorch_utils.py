@@ -107,7 +107,7 @@ class CooperativeLinear(nn.Linear):
         use_averaging = True,
         averaging_factor = 0.9,
         kl_loss_weight = 1e-5,
-        train_cooperative = False,
+        train_cooperative = True,
         device = 'cuda' if torch.cuda.is_available() else 'cpu',
         **kwargs
     ):
@@ -144,11 +144,11 @@ class CooperativeLinear(nn.Linear):
         
         self.updated_mu = mu
 
-    def initialize_prior_fine(self):
-        pass
-
     def gamma(self, v):
         return torch.lgamma(v).exp()
+
+    def initialize_prior_fine(self):
+        pass
         
     def multivariate_reparameterization(self, mu, var2):
         # https://www.wikiwand.com/en/Multivariate_normal_distribution#Drawing_values_from_the_distribution
@@ -296,6 +296,234 @@ class CooperativeLinear(nn.Linear):
         
     def eval(self):
         self.training = False
+
+# class CooperativeLinear(nn.Linear):
+#     def __init__(
+#         self, 
+#         in_features: int, 
+#         out_features: int, 
+#         num_experts: int,
+#         fan_in_fan_out : bool = False, 
+#         use_entropy = True,
+#         sample_period = 1,
+#         dirichlet_prior = 1,
+#         var_loss_scale = 1e-2,
+#         use_averaging = True,
+#         averaging_factor = 0.9,
+#         kl_loss_weight = 1e-5,
+#         train_cooperative = False,
+#         device = 'cuda' if torch.cuda.is_available() else 'cpu',
+#         **kwargs
+#     ):
+#         nn.Linear.__init__(self, in_features, out_features, **kwargs)
+        
+#         self.num_experts = num_experts
+#         self.in_features = in_features
+#         self.out_features = out_features
+#         self.fan_in_fan_out = fan_in_fan_out
+#         self.use_entropy = use_entropy
+#         self.device = device
+#         self.sample_period = sample_period
+#         self.use_averaging = use_averaging
+#         self.kl_loss_weight = kl_loss_weight
+
+#         self.train_cooperative = train_cooperative
+
+#         self.wishart_df = out_features
+#         self.wishert_prior = torch.eye(out_features)
+#         self.dirichlet_prior = dirichlet_prior
+#         self.var_loss_scale = var_loss_scale
+        
+#         self.expert_weights_prior = nn.Parameter(-dirichlet_prior + 2*dirichlet_prior * torch.rand(num_experts))
+        
+#         self.std_prior = nn.Parameter(torch.rand(out_features))
+
+#         self.averaging_factor = averaging_factor
+#         self.sample_counter = 0
+#         self.forward_counter = 0
+
+#         mu = cp(self.weight.data)
+#         if self.fan_in_fan_out == False:
+#             mu = mu.T
+        
+#         self.updated_mu = mu
+
+#     def initialize_prior_fine(self):
+#         # self.std_prior = nn.Parameter(self.weight.cov())
+#         print("PRIOR INITING")
+#         choleskied = (torch.linalg.cholesky((self.weight.cov() + 1e-2 * (torch.diag(torch.rand(self.weight.cov().shape[0])).abs().to(self.device) * torch.sign(self.weight.cov().diag()).to(self.device)).to(self.device)))).to(self.device)
+#         self.std_prior = nn.Parameter( torch.diag(choleskied.diag())).to(self.device)
+
+#     def gamma(self, v):
+#         return torch.lgamma(v).exp()
+        
+#     def multivariate_reparameterization(self, mu, var2):
+#         # https://www.wikiwand.com/en/Multivariate_normal_distribution#Drawing_values_from_the_distribution
+#         sampler = MultivariateNormal(loc=torch.zeros(self.out_features).to(self.device), \
+#                                      covariance_matrix=torch.eye(self.out_features).to(self.device))
+#         all_vars = sampler.sample((self.num_experts, self.in_features)).to(self.device)
+#         L = var2 
+#         updated_mu = self.var_loss_scale * torch.einsum('eio,op->eip', all_vars, L) + mu
+#         return updated_mu
+        
+#     def multivariate_kl(self, var):
+#         # https://statproofbook.github.io/P/mvn-kl.html
+#         # log-sum inequality - https://mat.hjg.com.ar/tic/img/lecture3.pdf
+#         return self.num_experts * 0.5 * (var.trace() - torch.log(var).trace() - self.out_features)
+        
+#     def wishart_reparameterization(self, std):
+#         # http://sfb649.wiwi.hu-berlin.de/fedc_homepage/xplore/tutorials/mvahtmlnode40.html
+#         sampler = Wishart(df=self.wishart_df, scale_tril=(std).to(self.device))
+#         sample = sampler.float32_rsample(torch.Size()).to(torch.float32)
+#         updated_var =  (sample.to(self.device)).to(torch.float32)
+#         if updated_var.isnan().any():
+#             updated_var = std @ std.T
+#         # print(updated_var.norm())
+
+#         updated_var = (torch.clip(updated_var, min=eps)).to(updated_var.device).to(torch.float32) #+ torch.eye(updated_var.shape[0]).to(self.device)*eps
+#         return updated_var
+        
+#     def wishart_kl(self, std):
+#         #var = self.var_loss_scale**2 * (std @ std.T)
+#         var = (std @ std.T)
+#         var = torch.diag(var.diag()).to(var.device)
+#         #print (var)
+#         #return 0.5 * (-torch.log(var.det())*self.wishart_df + var.trace()*self.wishart_df - self.wishart_df**2)
+#         return 0.5 * (-torch.log(var).trace()*self.wishart_df + var.trace()*self.wishart_df - self.wishart_df**2)
+
+#     def dirichlet_reparameterization(self, alpha2):
+#         # https://arxiv.org/pdf/1703.01488
+#         sampler = MultivariateNormal(loc=torch.zeros(self.num_experts).to(self.device), \
+#                                      covariance_matrix=torch.eye(self.num_experts).to(self.device))
+#         sample = sampler.sample().to(self.device)
+#         mu = torch.log(alpha2) - 1/self.num_experts * torch.log(alpha2).sum()
+#         sigma = torch.diag(1/alpha2 * (1 - 2/self.num_experts) + 1/(self.num_experts ** 2) * (1/alpha2).sum())
+#         return torch.linalg.cholesky(sigma) @ sample + mu
+        
+#     def dirichlet_kl(self, alpha2):
+#         # https://statproofbook.github.io/P/dir-kl.html
+#         alpha1 = torch.tensor([self.dirichlet_prior]*self.num_experts).to(self.device)
+#         kld = torch.log(self.gamma(alpha2.sum())/self.gamma(alpha1.sum())) + (torch.log(self.gamma(alpha2)/self.gamma(alpha1))).sum() + \
+#               ((alpha2 - alpha1)*(torch.digamma(alpha2) - torch.digamma(alpha2.sum()))).sum()
+#         return kld
+
+#     def get_variational_loss(self):
+#         #print (self.training)
+#         if self.train_cooperative == True and self.training == True:
+#             # kld of product of independent variables - http://www.math.tau.ac.il/~mansour/advanced-agt+ml/scribe5-lower-bound-MAB.pdf
+#             kl1 = self.dirichlet_kl(self.expert_weights_prior)
+#             kl2 = self.wishart_kl((self.std_prior))
+#             kl3 = self.multivariate_kl(self.gaussian_var_prior)
+            
+#             if self.use_entropy == True:
+#                 loss4 = self.calculate_entropy(self.expert_weights + 1e-8)
+#                 # print(f"kl2 = {kl2}, kl3 = {kl3}, loss4 = {loss4}")
+#                 # print("loss: ",self.kl_loss_weight*(kl1 + kl2 + kl3) + loss4)
+#                 return self.kl_loss_weight*(kl1 + kl2 + kl3) + loss4
+#             else:
+#                 # print("loss: ", self.kl_loss_weight * (kl1 + kl2 + kl3))
+#                 return self.kl_loss_weight * (kl1 + kl2 + kl3)
+#         else:
+#             # print("loss: 0")
+#             return 0
+        
+#     def calculate_entropy(self, expert_weights):
+#         return (expert_weights * expert_weights.log()).sum()
+
+#     def forward(self, x): 
+#         #print (self.training)       
+#         mu = cp(self.weight.data)
+#         # print(x)
+#         if x.isnan().any() :
+#             print('nan in x ')
+#         assert not x.isnan().any() , "NaN detected in x"
+#         if self.fan_in_fan_out == False:
+#             mu = mu.T
+
+#         if self.training == True:            
+#             #print ("Forward count", self.forward_counter)
+#             if self.train_cooperative == True:  
+#                 gaussian_var_prior = self.wishart_reparameterization((self.std_prior))
+#                 with torch.no_grad():
+#                     self.gaussian_var_prior = gaussian_var_prior
+#                 assert not gaussian_var_prior.isnan().any() , "NaN detected in gaussian var prior"
+#                 updated_mu = self.multivariate_reparameterization(mu, gaussian_var_prior)
+#                 assert not updated_mu.isnan().any() , "NaN detected in multivariate reparam"
+                 
+
+#                 updated_mu = torch.nan_to_num(updated_mu, nan=0.0)
+
+#                 expert_weights = self.dirichlet_reparameterization(nn.Sigmoid()(self.expert_weights_prior))
+#                 expert_weights = nn.Sigmoid()(torch.nan_to_num(expert_weights, nan=0.0))
+#                 expert_weights = expert_weights/expert_weights.sum()
+#                 if expert_weights.isnan().any() :
+#                     print('nan in exp wt ', expert_weights)
+#                     print(x)
+                
+#                 assert not expert_weights.isnan().any() , "NaN detected in expert weights"
+#                 expert_weights = torch.nan_to_num(expert_weights, nan=0.0)
+
+#                 updated_mu = torch.einsum('i,ijk->jk', expert_weights, updated_mu)
+#                 assert not updated_mu.isnan().any() , "NaN detected in updated mu"
+#                 if self.use_averaging == True:
+#                     if self.sample_counter > 1:
+#                         with torch.no_grad():
+#                             self.updated_mu = 1/self.sample_counter * (torch.nan_to_num(updated_mu, nan=0.0) + (self.sample_counter - 1)*self.updated_mu)
+#                             #self.updated_mu = self.averaging_factor * torch.nan_to_num(updated_mu, nan=0.0) + (1-self.averaging_factor)*self.updated_mu
+#                     else:
+#                         with torch.no_grad():
+#                             self.updated_mu = torch.nan_to_num(updated_mu, nan=0.0)
+#                 else:
+#                     with torch.no_grad():
+#                         self.updated_mu = torch.nan_to_num(updated_mu, nan=0.0)
+#                 with torch.no_grad():
+#                     self.expert_weights = expert_weights
+
+#                 # assert not self.bias.isnan().any() , "NaN in bias term"
+#                 # print(self.bias)
+#                 #print (x.device, self.updated_mu.device)                     
+#                 if self.fan_in_fan_out == False:
+#                     #print (F.linear(x, mu.T, self.bias))
+#                     res = F.linear(x, self.updated_mu.T, self.bias) 
+#                     assert not self.updated_mu.isnan().any() , "NaN detected in upd mu"
+#                     assert not res.isnan().any() , "NaN detected in res"
+                    
+#                 else:
+#                     #print (F.linear(x, mu.T, self.bias))
+#                     res = F.linear(x, self.updated_mu, self.bias)
+#                     assert not self.updated_mu.isnan().any() , "NaN detected in upd mu"
+#                     assert not res.isnan().any() , "NaN detected in res"
+#             else:
+#                 if self.fan_in_fan_out == False:
+#                     res = F.linear(x, mu.T, self.bias)
+#                     assert not mu.isnan().any() , "NaN detected in mu"
+#                     assert not res.isnan().any() , "NaN detected in res"
+#                 else:
+#                     res = F.linear(x, mu, self.bias)
+#                     assert not mu.isnan().any() , "NaN detected in mu"
+#                     assert not res.isnan().any() , "NaN detected in res"
+                
+#                 self.updated_mu = mu
+
+#             self.forward_counter += 1
+#             assert not res.isnan().any() , "NaN detected in res"
+#             # print("Result",res)
+#             return res
+#         else:
+#             if self.fan_in_fan_out == False:
+#                 res = F.linear(x, self.updated_mu.T, self.bias)
+#                 assert not self.updated_mu.isnan().any() , "NaN detected in upd mu"
+#                 assert not res.isnan().any() , "NaN detected in res"
+#             else:
+#                 res = F.linear(x, self.updated_mu, self.bias)
+#                 assert not self.updated_mu.isnan().any() , "NaN detected in upd mu"
+#                 assert not res.isnan().any() , "NaN detected in res"
+#             assert not res.isnan().any() , "NaN detected in res"
+#             # print("REsult", res)
+#             return res
+        
+#     def eval(self):
+#         self.training = False
 
 class CooperativeLinear_V1(nn.Linear):
     def __init__(

@@ -12,8 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""DeBERTa-v2 model configuration"""
-
+""" DeBERTa-v2 model configuration"""
 from collections import OrderedDict
 from typing import TYPE_CHECKING, Any, Mapping, Optional, Union
 
@@ -27,6 +26,9 @@ if TYPE_CHECKING:
 
 
 logger = logging.get_logger(__name__)
+
+
+from ..deprecated._archive_maps import DEBERTA_V2_PRETRAINED_CONFIG_ARCHIVE_MAP  # noqa: F401, E402
 
 
 class DebertaV2Config(PretrainedConfig):
@@ -80,7 +82,7 @@ class DebertaV2Config(PretrainedConfig):
         pos_att_type (`List[str]`, *optional*):
             The type of relative position attention, it can be a combination of `["p2c", "c2p"]`, e.g. `["p2c"]`,
             `["p2c", "c2p"]`, `["p2c", "c2p"]`.
-        layer_norm_eps (`float`, *optional*, defaults to 1e-12):
+        layer_norm_eps (`float`, optional, defaults to 1e-12):
             The epsilon used by the layer normalization layers.
 
     Example:
@@ -121,15 +123,49 @@ class DebertaV2Config(PretrainedConfig):
         pos_att_type=None,
         pooler_dropout=0,
         pooler_hidden_act="gelu",
+        cls_dropout=None,
+        sparsity=2e-3,
+        apply_lora=False,
+        apply_sparseft=False,
+        reg_sparse_coef=0.0,
+        inp_out_mask_path="None",
+        wt_mask_path="None",
+        lora_type="frd",
+        lora_module="query,value", #query,key,value,intermediate,layer.output,attention.output
+        sparseft_module="query,value", #query,key,value,intermediate,layer.output,attention.output
+        lora_alpha=None,
+        lora_r=None,
+        apply_adapter=False,
+        adapter_type=None,
+        sparseft_type=0, 
+        adapter_size=None,
+        reg_loss_wgt=0.0,
+        masking_prob=0.0,
+        budget=1000000,
+        cls_token_id=1,
+        sep_token_id=2,
+        unk_token_id=3,
+        expert_locations = "query,key,value,attention_out,intermediate,output", #
+        num_experts = 4, #4
+        var_loss_scale = 1e-2,
+        use_entropy = False,
+        sample_period = 1,
+        use_averaging = True,
+        averaging_factor = 0.9,
+        kl_loss_weight = 1,
+        train_cooperative = True,
         **kwargs,
     ):
         super().__init__(**kwargs)
-
+        self.inp_out_mask_path = inp_out_mask_path
+        self.wt_mask_path = wt_mask_path
+        self.reg_sparse_coef = reg_sparse_coef
         self.hidden_size = hidden_size
         self.num_hidden_layers = num_hidden_layers
         self.num_attention_heads = num_attention_heads
         self.intermediate_size = intermediate_size
         self.hidden_act = hidden_act
+        self.sparsity = sparsity
         self.hidden_dropout_prob = hidden_dropout_prob
         self.attention_probs_dropout_prob = attention_probs_dropout_prob
         self.max_position_embeddings = max_position_embeddings
@@ -139,7 +175,8 @@ class DebertaV2Config(PretrainedConfig):
         self.max_relative_positions = max_relative_positions
         self.pad_token_id = pad_token_id
         self.position_biased_input = position_biased_input
-
+        self.num_experts = num_experts
+        self.budget = budget
         # Backwards compatibility
         if isinstance(pos_att_type, str):
             pos_att_type = [x.strip() for x in pos_att_type.lower().split("|")]
@@ -151,7 +188,33 @@ class DebertaV2Config(PretrainedConfig):
         self.pooler_hidden_size = kwargs.get("pooler_hidden_size", hidden_size)
         self.pooler_dropout = pooler_dropout
         self.pooler_hidden_act = pooler_hidden_act
-
+        self.cls_dropout = cls_dropout
+        self.apply_lora = apply_lora
+        self.apply_sparseft = apply_sparseft
+        self.sparseft_module = sparseft_module
+        self.lora_type = lora_type
+        self.lora_module = lora_module 
+        self.lora_alpha = lora_alpha
+        self.lora_r = lora_r
+        self.apply_adapter = apply_adapter
+        self.adapter_type = adapter_type
+        self.adapter_size = adapter_size
+        self.reg_loss_wgt = reg_loss_wgt
+        self.masking_prob = masking_prob
+        self.cls_token_id = cls_token_id
+        self.sep_token_id = sep_token_id
+        self.unk_token_id = unk_token_id
+        self.sparseft_type = sparseft_type
+        
+        self.expert_locations = expert_locations
+        self.num_experts = num_experts
+        self.var_loss_scale = var_loss_scale
+        self.use_entropy = use_entropy
+        self.use_averaging = use_averaging
+        self.sample_period = sample_period 
+        self.averaging_factor = averaging_factor
+        self.kl_loss_weight = kl_loss_weight
+        self.train_cooperative = train_cooperative
 
 class DebertaV2OnnxConfig(OnnxConfig):
     @property

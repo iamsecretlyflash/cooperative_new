@@ -12,7 +12,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""PyTorch DPR model for Open Domain Question Answering."""
+""" PyTorch DPR model for Open Domain Question Answering."""
+
 
 from dataclasses import dataclass
 from typing import Optional, Tuple, Union
@@ -37,6 +38,13 @@ logger = logging.get_logger(__name__)
 
 _CONFIG_FOR_DOC = "DPRConfig"
 _CHECKPOINT_FOR_DOC = "facebook/dpr-ctx_encoder-single-nq-base"
+
+
+from ..deprecated._archive_maps import (  # noqa: F401, E402
+    DPR_CONTEXT_ENCODER_PRETRAINED_MODEL_ARCHIVE_LIST,  # noqa: F401, E402
+    DPR_QUESTION_ENCODER_PRETRAINED_MODEL_ARCHIVE_LIST,  # noqa: F401, E402
+    DPR_READER_PRETRAINED_MODEL_ARCHIVE_LIST,  # noqa: F401, E402
+)
 
 
 ##########
@@ -134,8 +142,6 @@ class DPRReaderOutput(ModelOutput):
 
 
 class DPRPreTrainedModel(PreTrainedModel):
-    _supports_sdpa = True
-
     def _init_weights(self, module):
         """Initialize the weights"""
         if isinstance(module, nn.Linear):

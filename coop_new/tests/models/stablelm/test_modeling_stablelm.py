@@ -12,7 +12,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Testing suite for the PyTorch StableLm model."""
+""" Testing suite for the PyTorch StableLm model. """
+
 
 import unittest
 
@@ -20,7 +21,6 @@ from parameterized import parameterized
 
 from transformers import StableLmConfig, is_torch_available, set_seed
 from transformers.testing_utils import (
-    is_flaky,
     require_bitsandbytes,
     require_flash_attn,
     require_torch,
@@ -42,7 +42,6 @@ if is_torch_available():
         AutoTokenizer,
         StableLmForCausalLM,
         StableLmForSequenceClassification,
-        StableLmForTokenClassification,
         StableLmModel,
     )
     from transformers.models.stablelm.modeling_stablelm import (
@@ -287,15 +286,12 @@ class StableLmModelTester:
 # Copied from transformers.tests.persimmon.test_modeling_persimmon.PersimmonModelTest with Persimmon -> StableLm
 class StableLmModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMixin, unittest.TestCase):
     all_model_classes = (
-        (StableLmModel, StableLmForCausalLM, StableLmForSequenceClassification, StableLmForTokenClassification)
-        if is_torch_available()
-        else ()
+        (StableLmModel, StableLmForCausalLM, StableLmForSequenceClassification) if is_torch_available() else ()
     )
     pipeline_model_mapping = (
         {
             "feature-extraction": StableLmModel,
             "text-classification": StableLmForSequenceClassification,
-            "token-classification": StableLmForTokenClassification,
             # TODO (ydshieh): check why these two fail. Fix them or skip them in a better way.
             # "text-generation": StableLmForCausalLM,
             # "zero-shot": StableLmForSequenceClassification,
@@ -358,22 +354,6 @@ class StableLmModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterM
         model.eval()
         result = model(input_ids, attention_mask=attention_mask, labels=sequence_labels)
         self.assertEqual(result.logits.shape, (self.model_tester.batch_size, self.model_tester.num_labels))
-
-    # Copied from tests.models.llama.test_modeling_llama.LlamaModelTest.test_llama_token_classification_model with Llama->StableLm,llama->stablelm
-    def test_stablelm_token_classification_model(self):
-        config, input_dict = self.model_tester.prepare_config_and_inputs_for_common()
-        config.num_labels = 3
-        input_ids = input_dict["input_ids"]
-        attention_mask = input_ids.ne(1).to(torch_device)
-        token_labels = ids_tensor([self.model_tester.batch_size, self.model_tester.seq_length], config.num_labels)
-        model = StableLmForTokenClassification(config=config)
-        model.to(torch_device)
-        model.eval()
-        result = model(input_ids, attention_mask=attention_mask, labels=token_labels)
-        self.assertEqual(
-            result.logits.shape,
-            (self.model_tester.batch_size, self.model_tester.seq_length, self.model_tester.num_labels),
-        )
 
     @parameterized.expand([("linear",), ("dynamic",)])
     # Copied from tests.models.llama.test_modeling_llama.LlamaModelTest.test_model_rope_scaling_from_config with Llama->StableLm
@@ -502,40 +482,6 @@ class StableLmModelIntegrationTest(unittest.TestCase):
         EXPECTED_TEXT_COMPLETION = """My favorite food has always been pizza, but lately I’ve been craving something different. I’ve been trying to eat healthier and I’ve"""
         self.assertEqual(text, EXPECTED_TEXT_COMPLETION)
 
-    @slow
-    def test_model_tiny_random_stablelm_2_logits(self):
-        # Check parallel residual and qk layernorm forward pass
-        input_ids = {"input_ids": torch.tensor([[510, 8588, 310, 1900, 9386]], dtype=torch.long, device=torch_device)}
-
-        model = StableLmForCausalLM.from_pretrained("stabilityai/tiny-random-stablelm-2").to(torch_device)
-        model.eval()
-
-        output = model(**input_ids).logits
-
-        # Expected mean on dim = -1
-        EXPECTED_MEAN = torch.tensor([[-2.7196, -3.6099, -2.6877, -3.1973, -3.9344]]).to(torch_device)
-        self.assertTrue(torch.allclose(output.mean(dim=-1), EXPECTED_MEAN, atol=1e-4, rtol=1e-4))
-
-        # Expected logits sliced from [0, 0, 0:30]
-        EXPECTED_SLICE = torch.tensor([2.8364, 5.3811, 5.1659, 7.5485, 4.3219, 6.3315, 1.3967, 6.9147, 3.9679, 6.4786, 5.9176, 3.3067, 5.2917, 0.1485, 3.9630, 7.9947,10.6727, 9.6757, 8.8772, 8.3527, 7.8445, 6.6025, 5.5786, 7.0985,6.1369, 3.4259, 1.9397, 4.6157, 4.8105, 3.1768]).to(torch_device)  # fmt: skip
-        self.assertTrue(torch.allclose(output[0, 0, :30], EXPECTED_SLICE, atol=1e-4, rtol=1e-4))
-
-    @slow
-    def test_model_tiny_random_stablelm_2_generation(self):
-        # Check parallel residual and qk layernorm generation
-        tokenizer = AutoTokenizer.from_pretrained("stabilityai/tiny-random-stablelm-2")
-        model = StableLmForCausalLM.from_pretrained("stabilityai/tiny-random-stablelm-2")
-        input_ids = tokenizer.encode(
-            "My favorite ride at the amusement park",
-            return_tensors="pt",
-        )
-
-        outputs = model.generate(input_ids, max_new_tokens=20, temperature=0)
-        text = tokenizer.decode(outputs[0], skip_special_tokens=True)
-
-        EXPECTED_TEXT_COMPLETION = """My favorite ride at the amusement park is the 2000-mile roller coaster. It's a thrilling ride filled with roller coast"""
-        self.assertEqual(text, EXPECTED_TEXT_COMPLETION)
-
     @require_bitsandbytes
     @slow
     @require_flash_attn
@@ -554,8 +500,6 @@ class StableLmModelIntegrationTest(unittest.TestCase):
         self.assertEqual(EXPECTED_OUTPUT_TOKEN_IDS, generated_ids[0][-3:].tolist())
 
     # Copied from transformers.tests.models.llama.test_modeling_llama.LlamaModelTest.test_eager_matches_sdpa_generate with Llama->StableLm,saibo/llama-1B->stabilityai/stablelm-3b-4e1t
-    # TODO: @Fxmarty
-    @is_flaky(max_attempts=3, description="flaky on some models.")
     @require_torch_sdpa
     @slow
     def test_eager_matches_sdpa_generate(self):

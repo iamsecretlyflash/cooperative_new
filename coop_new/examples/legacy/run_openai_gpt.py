@@ -28,7 +28,6 @@
           --output_dir ../log \
           --train_batch_size 16 \
 """
-
 import argparse
 import csv
 import logging

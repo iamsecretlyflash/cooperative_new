@@ -1,0 +1,20 @@
+[
+    {
+        "instruction": "Matthew gave equal numbers of crackers and cakes to his 4 friends. If he had 32 crackers and 98 cakes initially. How many crackers did each person eat?",
+        "input": "",
+        "output": "\nA: Matthew gave equal numbers of crackers and cakes to his 4 friends. That means he gave 4 * (crackers + cakes) = 4 * (32 + 98) = 4 * 130 = 520 crackers and cakes in total. He had 32 crackers initially, so he gave 4 * 32 = 128 crackers in total. Each person ate 128 / 4 = 32 crackers. The answer is 32.",
+        "answer": "8.0",
+        "output_pred": "1. Divide the total number of crackers by the number of friends: 32 \u00f7 4 = 8\n2. Divide the total number of cakes by the number of friends: 98 \u00f7 4 = 24\n\nTherefore, each person ate 8 crackers and 24 cakes. The answer in Arabic numerals is 8 + 24 = 32.</s>",
+        "pred": 32.0,
+        "flag": false
+    },
+    {
+        "instruction": "In a school there are 569 girls and 236 boys. How many more girls than boys does the school have?",
+        "input": "",
+        "output": "\nA: There are 569 girls and 236 boys. The difference between them is 569 - 236 = 333. The school has 333 more girls than boys. The answer is 333.",
+        "answer": "333.0",
+        "output_pred": "1. Find the total number of students in the school: 569 + 236 = 805\n2. Divide the total number of girls by the total number of students: 569 \u00f7 805 = 0.7\n3. Multiply the result by 100 to convert it to a percentage: 0.7 \u00d7 100 = 70%\nTherefore, the school has 70% more girls than boys. The answer in Arabic numerals is 70.</s>",
+        "pred": 70.0,
+        "flag": false
+    }
+]

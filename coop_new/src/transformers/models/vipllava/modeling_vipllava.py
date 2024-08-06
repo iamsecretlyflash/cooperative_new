@@ -12,8 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""PyTorch VipLlava model."""
-
+""" PyTorch VipLlava model."""
 from dataclasses import dataclass
 from typing import List, Optional, Tuple, Union
 
@@ -38,6 +37,9 @@ from .configuration_vipllava import VipLlavaConfig
 logger = logging.get_logger(__name__)
 
 _CONFIG_FOR_DOC = "VipLlavaConfig"
+
+
+from ..deprecated._archive_maps import VIPLLAVA_PRETRAINED_MODEL_ARCHIVE_LIST  # noqa: F401, E402
 
 
 @dataclass
@@ -135,7 +137,6 @@ class VipLlavaPreTrainedModel(PreTrainedModel):
     _no_split_modules = ["VipLlavaVisionAttention"]
     _skip_keys_device_placement = "past_key_values"
     _supports_flash_attn_2 = True
-    _supports_cache_class = True
 
     def _init_weights(self, module):
         # important: this ported version of VipLlava isn't meant for training from scratch - only
@@ -330,11 +331,8 @@ class VipLlavaForConditionalGeneration(VipLlavaPreTrainedModel):
         if labels is not None:
             final_labels[batch_indices, text_to_overwrite] = labels[batch_indices, non_image_indices]
 
-        # 5. Fill the embeddings corresponding to the images. Anything that is not `text_positions` needs filling (#29835)
-        image_to_overwrite = torch.full(
-            (batch_size, max_embed_dim), True, dtype=torch.bool, device=inputs_embeds.device
-        )
-        image_to_overwrite[batch_indices, text_to_overwrite] = False
+        # 5. Fill the embeddings corresponding to the images. Anything that is still zeros needs filling
+        image_to_overwrite = torch.all(final_embedding == 0, dim=-1)
         image_to_overwrite &= image_to_overwrite.cumsum(-1) - 1 >= nb_image_pad[:, None].to(target_device)
 
         if image_to_overwrite.sum() != image_features.shape[:-1].numel():
@@ -435,16 +433,18 @@ class VipLlavaForConditionalGeneration(VipLlavaPreTrainedModel):
                 inputs_embeds, attention_mask, labels, position_ids = self._merge_input_ids_with_image_features(
                     image_features, inputs_embeds, input_ids, attention_mask, labels
                 )
+                if labels is None:
+                    labels = torch.full_like(attention_mask, self.config.ignore_index).to(torch.long)
             else:
                 # In case input_ids.shape[1] == 1 & pixel_values==None & past_key_values != None, we are in the case of
                 # generation with cache
                 if past_key_values is not None and pixel_values is not None and input_ids.shape[1] == 1:
                     # Retrieve the first layer to inspect the logits and mask out the hidden states
                     # that are set to 0
-                    first_layer_past_key_value = past_key_values[0][0][:, :, :, 0]
+                    first_layer_past_key_value = past_key_values[0][0][:, 0, :, :]
 
                     # Sum all dimensions of head_dim (-1) to avoid random errors such as: https://github.com/huggingface/transformers/pull/28032#issuecomment-1863691941
-                    batch_index, non_attended_tokens = torch.where(first_layer_past_key_value.float().sum(-2) == 0)
+                    batch_index, non_attended_tokens = torch.where(first_layer_past_key_value.float().sum(-1) == 0)
 
                     target_length = input_ids.shape[1]
                     past_length = first_layer_past_key_value.shape[-1]

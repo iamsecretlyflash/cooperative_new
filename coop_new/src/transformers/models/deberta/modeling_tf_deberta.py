@@ -12,7 +12,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""TF 2.0 DeBERTa model."""
+""" TF 2.0 DeBERTa model."""
+
 
 from __future__ import annotations
 
@@ -51,6 +52,9 @@ logger = logging.get_logger(__name__)
 
 _CONFIG_FOR_DOC = "DebertaConfig"
 _CHECKPOINT_FOR_DOC = "kamalkraj/deberta-base"
+
+
+from ..deprecated._archive_maps import TF_DEBERTA_PRETRAINED_MODEL_ARCHIVE_LIST  # noqa: F401, E402
 
 
 class TFDebertaContextPooler(keras.layers.Layer):
@@ -669,10 +673,10 @@ class TFDebertaDisentangledSelfAttention(keras.layers.Layer):
                 sequence length in which element [i,j] = *1* means the *i* th token in the input can attend to the *j*
                 th token.
 
-            return_att (`bool`, *optional*):
+            return_att (`bool`, optional):
                 Whether return the attention matrix.
 
-            query_states (`tf.Tensor`, *optional*):
+            query_states (`tf.Tensor`, optional):
                 The *Q* state in *Attention(Q,K,V)*.
 
             relative_pos (`tf.Tensor`):

@@ -12,8 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""T5 model configuration"""
-
+""" T5 model configuration"""
 from typing import Mapping
 
 from ...configuration_utils import PretrainedConfig
@@ -22,6 +21,9 @@ from ...utils import logging
 
 
 logger = logging.get_logger(__name__)
+
+
+from ..deprecated._archive_maps import T5_PRETRAINED_CONFIG_ARCHIVE_MAP  # noqa: F401, E402
 
 
 class T5Config(PretrainedConfig):
@@ -95,6 +97,15 @@ class T5Config(PretrainedConfig):
         pad_token_id=0,
         eos_token_id=1,
         classifier_dropout=0.0,
+        expert_locations = "query,key,value,attention_out,intermediate,output", #
+        num_experts = 4, #4
+        log_variance_init = -10,
+        single_variance = False,
+        var_loss_scale = 1e-6,
+        use_entropy = False,
+        freeze_base = True,
+        inference_mixing_coeff = 1,
+        sample_period = 1,
         **kwargs,
     ):
         self.vocab_size = vocab_size
@@ -115,6 +126,16 @@ class T5Config(PretrainedConfig):
         self.feed_forward_proj = feed_forward_proj
         self.use_cache = use_cache
 
+        self.expert_locations = expert_locations
+        self.num_experts = num_experts
+        self.log_variance_init = log_variance_init
+        self.single_variance = single_variance,
+        self.var_loss_scale = var_loss_scale
+        self.use_entropy = use_entropy,
+        self.freeze_base = freeze_base
+        self.inference_mixing_coeff = inference_mixing_coeff
+        self.sample_period = sample_period 
+        
         act_info = self.feed_forward_proj.split("-")
         self.dense_act_fn = act_info[-1]
         self.is_gated_act = act_info[0] == "gated"

@@ -12,7 +12,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Testing suite for the PyTorch BART model."""
+""" Testing suite for the PyTorch BART model. """
+
 
 import copy
 import tempfile
@@ -430,6 +431,7 @@ class BartModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMixin
     all_generative_model_classes = (BartForConditionalGeneration,) if is_torch_available() else ()
     pipeline_model_mapping = (
         {
+            "conversational": BartForConditionalGeneration,
             "feature-extraction": BartModel,
             "fill-mask": BartForConditionalGeneration,
             "question-answering": BartForQuestionAnswering,
@@ -512,10 +514,8 @@ class BartModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMixin
         model.generate(input_ids, attention_mask=attention_mask)
         model.generate(num_beams=4, do_sample=True, early_stopping=False, num_return_sequences=3)
 
-    @unittest.skip(
-        reason="This architecure has tied weights by default and there is no way to remove it, check: https://github.com/huggingface/transformers/pull/31771#issuecomment-2210915245"
-    )
-    def test_load_save_without_tied_weights(self):
+    @unittest.skip("Does not support conversations.")
+    def test_pipeline_conversational(self):
         pass
 
 
@@ -1521,10 +1521,9 @@ class BartStandaloneDecoderModelTest(ModelTesterMixin, GenerationTesterMixin, un
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
         self.model_tester.create_and_check_decoder_model_attention_mask_past(*config_and_inputs)
 
-    @unittest.skip(reason="Decoder cannot keep gradients")
     def test_retain_grad_hidden_states_attentions(self):
+        # decoder cannot keep gradients
         return
 
-    @unittest.skip
     def test_save_load_fast_init_from_base(self):
         pass

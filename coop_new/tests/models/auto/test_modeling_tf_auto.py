@@ -118,15 +118,15 @@ class TFAutoModelTest(unittest.TestCase):
         model_name = "openai-community/gpt2"
         config = AutoConfig.from_pretrained(model_name)
         self.assertIsNotNone(config)
-        self.assertIsInstance(config, GPT2Config)
+        self.assertIsInstance(config, BertConfig)
 
         model = TFAutoModelWithLMHead.from_pretrained(model_name)
         self.assertIsNotNone(model)
-        self.assertIsInstance(model, TFGPT2LMHeadModel)
+        self.assertIsInstance(model, TFBertForMaskedLM)
 
     @slow
     def test_model_for_masked_lm(self):
-        model_name = "google-bert/bert-base-uncased"
+        model_name = "openai-community/gpt2"
         config = AutoConfig.from_pretrained(model_name)
         self.assertIsNotNone(config)
         self.assertIsInstance(config, BertConfig)
@@ -138,7 +138,7 @@ class TFAutoModelTest(unittest.TestCase):
 
     @slow
     def test_model_for_encoder_decoder_lm(self):
-        model_name = "google-t5/t5-base"
+        model_name = "openai-community/gpt2"
         config = AutoConfig.from_pretrained(model_name)
         self.assertIsNotNone(config)
         self.assertIsInstance(config, T5Config)

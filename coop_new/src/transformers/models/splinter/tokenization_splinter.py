@@ -297,7 +297,7 @@ class SplinterTokenizer(PreTrainedTokenizer):
         return (vocab_file,)
 
 
-class BasicTokenizer:
+class BasicTokenizer(object):
     """
     Constructs a BasicTokenizer that will run basic tokenization (punctuation splitting, lower casing, etc.).
 
@@ -446,7 +446,7 @@ class BasicTokenizer:
         return "".join(output)
 
 
-class WordpieceTokenizer:
+class WordpieceTokenizer(object):
     """Runs WordPiece tokenization."""
 
     def __init__(self, vocab, unk_token, max_input_chars_per_word=100):
