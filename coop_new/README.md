@@ -4,6 +4,8 @@
 pip install -e .
 cd translation && pip install -e .
 pip install -r requirements.txt
+pip install -r environment_upd.txt
+cd LLM-Adapters/peft && pip install -e .
 pip install torch==2.2.1 torchvision==0.17.1 torchaudio==2.2.1 --index-url https://download.pytorch.org/whl/cu118
 pip install evaluate
 pip install huggingface-hub -U
