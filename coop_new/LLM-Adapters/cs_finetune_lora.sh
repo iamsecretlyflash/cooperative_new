@@ -1,7 +1,7 @@
 CUDA_VISIBLE_DEVICES=3 python finetune.py \
   --base_model '/home/models/llama-7b-hf' \
   --data_path 'ft-training_set/commonsense_170k.json' \
-  --output_dir './final_trained_models/llama2/cs/lora_A' \
+  --output_dir './final_trained_models/llama/cs/lora_A' \
   --batch_size 4 \
   --micro_batch_size 4 \
   --num_epochs 5 \
