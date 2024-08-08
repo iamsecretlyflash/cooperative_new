@@ -23,7 +23,7 @@ from typing import List, Optional, Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from transformers.pytorch_utils_new import Conv1D, CooperativeLinear
+from transformers.pytorch_utils import Conv1D, CooperativeLinear
 
 from ..utils import PeftConfig, PeftType, transpose
 
