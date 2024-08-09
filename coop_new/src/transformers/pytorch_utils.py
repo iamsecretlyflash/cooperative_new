@@ -229,7 +229,7 @@ class CooperativeLinear(nn.Linear):
             return 0
         
     def calculate_entropy(self, expert_weights):
-        return 1/(expert_weights * expert_weights.log()).sum()
+        return (expert_weights * expert_weights.log()).sum()
 
     def forward(self, x): 
         #print (self.training)       
