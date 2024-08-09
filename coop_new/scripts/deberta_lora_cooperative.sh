@@ -17,7 +17,7 @@ do
 task="${tasks[$i]}"
 eval_steps="${eval_st[$i]}"
 bs="${batch[$i]}"
-TF_CPP_MIN_LOG_LEVEL=2 TF_ENABLE_ONEDNN_OPTS=1 WANDB_PROJECT='Deberta-Cooperative-PostHoc' CUDA_VISIBLE_DEVICES=2 python /home/arinjay/Cooperative3/Cooperative_LLM/examples/text-classification/run_glue.py  \
+TF_CPP_MIN_LOG_LEVEL=2 TF_ENABLE_ONEDNN_OPTS=1 WANDB_PROJECT='Deberta-Cooperative-PostHoc' CUDA_VISIBLE_DEVICES=2 python /home/arinjay/new_cop/cooperative_new/coop_new/examples/text-classification/run_glue.py  \
 --model_name_or_path microsoft/deberta-v3-base \
 --expert_locations 'lora_A' \
 --num_experts ${num_experts} \
