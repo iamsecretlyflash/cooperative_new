@@ -10,6 +10,8 @@ kl_loss_weight=1e-5
 num_epochs=10
 num_coop_epochs=10
 num_std_epochs=0
+lora_r=16
+lora_alpha=32
 for i in "${!tasks[@]}";
 do
 task="${tasks[$i]}"
@@ -37,6 +39,6 @@ TF_CPP_MIN_LOG_LEVEL=2 TF_ENABLE_ONEDNN_OPTS=1 WANDB_PROJECT='Deberta-Cooperativ
 --apply_lora \
 --lora_r 8 \
 --lora_alpha 16 \
---output_dir ../outputs/deberta/${task}/cooperative_lora/posthoc/8/16/${lr}/new/inverse \
+--output_dir ../outputs/deberta/${task}/cooperative_lora/posthoc/${num_epochs}/${num_coop_epochs}/${kl_loss_weight}/${lr}/${lora_r}/${lora_alpha}/${num_experts} \
 --overwrite_output_dir
 done
