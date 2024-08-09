@@ -1,8 +1,8 @@
-tasks=('mrpc' 'cola') #'rte' 'stsb' 'sst2' 'qnli' 'mnli' 'qqp')
-eval_st=(115 268) #156 180 2105 3274 12272 11371)
+tasks=('mrpc' 'cola' 'rte' 'stsb' 'sst2' 'qnli' 'mnli' 'qqp')
+eval_st=(115 268 156 180 2105 3274 12272 11371)
 num_experts=4
 lr=9e-4
-batch=(32 32) #16 32 32 32 32 32)
+batch=(32 32 16 32 32 32 32 32)
 sample_period=1
 max_seq_length=128
 vls=5e-3
