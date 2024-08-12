@@ -148,7 +148,7 @@ class CooperativeLinear(nn.Linear):
         return torch.lgamma(v).exp()
 
     def initialize_prior_fine(self):
-        pass
+        self.std_prior = nn.Parameter((torch.linalg.cholesky(self.weight.cov()).diag())).to(self.device)
         
     def multivariate_reparameterization(self, mu, var2):
         # https://www.wikiwand.com/en/Multivariate_normal_distribution#Drawing_values_from_the_distribution
