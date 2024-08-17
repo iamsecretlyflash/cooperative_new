@@ -2138,6 +2138,11 @@ class Trainer:
                    if type(v).__name__ == 'CooperativeLinear' or type(v).__name__ == 'CooperativeConv1D':
                        v.train_cooperative = True
                        v.initialize_prior_fine()
+                       v.weight.requires_grad = False
+                       try:
+                           v.bias.requires_grad = False
+                       except:
+                           pass
             else:
                 print("TRAINING STANDARD")
                 for v in reversed(list(dict(model.named_modules()).values())):
