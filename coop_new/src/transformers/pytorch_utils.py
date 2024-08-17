@@ -14,7 +14,7 @@
 import inspect
 from typing import Callable, List, Optional, Set, Tuple, Union
 import warnings
-
+import os
 import torch
 from torch.distributions.multivariate_normal import MultivariateNormal
 from torch.distributions.wishart import Wishart
@@ -112,7 +112,6 @@ class CooperativeLinear(nn.Linear):
         **kwargs
     ):
         nn.Linear.__init__(self, in_features, out_features, **kwargs)
-        
         self.num_experts = num_experts
         self.in_features = in_features
         self.out_features = out_features
@@ -121,7 +120,8 @@ class CooperativeLinear(nn.Linear):
         self.device = device
         self.sample_period = sample_period
         self.use_averaging = use_averaging
-        self.kl_loss_weight = kl_loss_weight
+        self.kl_loss_weight = kl_loss_weight 
+        self.prior_initialised = False
 
         self.train_cooperative = train_cooperative
 
@@ -148,7 +148,12 @@ class CooperativeLinear(nn.Linear):
         return torch.lgamma(v).exp()
 
     def initialize_prior_fine(self):
-        self.std_prior = nn.Parameter((torch.linalg.cholesky(self.weight.cov()).diag())).to(self.device)
+        
+        # self.std_prior = nn.Parameter(self.weight.cov())
+        if not self.prior_initialised:
+            print("PRIOR INITING XYZABC 3")
+            self.std_prior = nn.Parameter(((self.weight.cov()).diag()).sqrt()).to(self.device)
+            self.prior_initialised = True
         
     def multivariate_reparameterization(self, mu, var2):
         # https://www.wikiwand.com/en/Multivariate_normal_distribution#Drawing_values_from_the_distribution
@@ -180,9 +185,8 @@ class CooperativeLinear(nn.Linear):
         #sampler.arg_constraints['scale_tril'] = constraints.greater_than(0)
         #sampler.support = constraints.lower_cholesky
         #print (sampler)
-        sample = sampler.float32_rsample(torch.Size()).to(torch.float32)
-
-        updated_var =  std @ sample.to(self.device) @ std.T
+        sample = sampler.float32_rsample(torch.Size()).to(torch.float32).to(self.device)
+        updated_var =  std @ sample@ std.T
         #updated_var =  std @ sampler.sample().to(self.device) @ std.T
         updated_var = torch.diag(torch.clip(updated_var.diag(), min=eps)).to(updated_var.device).to(torch.float32) #+ torch.eye(updated_var.shape[0]).to(self.device)*eps
 
