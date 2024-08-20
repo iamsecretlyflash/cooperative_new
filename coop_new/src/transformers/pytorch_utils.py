@@ -291,6 +291,8 @@ class CooperativeLinear(nn.Linear):
             
             return res
         else:
+            if x.device!=self.updated_mu.device:
+                self.updated_mu=self.updated_mu.to(x.device)
             if self.fan_in_fan_out == False:
                 res = F.linear(x, self.updated_mu.T, self.bias)
             else:
