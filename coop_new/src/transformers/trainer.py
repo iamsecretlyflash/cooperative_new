@@ -1824,16 +1824,6 @@ class Trainer:
                 self._move_model_to_device(self.model, args.device)
             self.model_wrapped = self.model
         
-        #if self.model.config.freeze_base:
-        #    print('Freezing base weights')
-        #    for v in reversed(list(dict(self.model.named_modules()).values())):
-        #            if type(v).__name__ == 'CooperativeLinear' or type(v).__name__ == 'CooperativeConv1D':
-        #                v.weight.requires_grad = False
-        #                try:
-        #                    v.bias.requires_grad = False
-        #                except:
-        #                    pass
-
         inner_training_loop = find_executable_batch_size(
             self._inner_training_loop, self._train_batch_size, args.auto_find_batch_size
         )
@@ -2102,8 +2092,10 @@ class Trainer:
 
         # tr_loss is a tensor to avoid synchronization of TPUs through .item()
         tr_loss = torch.tensor(0.0).to(args.device)
+        tr_cross_loss = torch.tensor(0.0).to(args.device)
         # _total_loss_scalar is updated everytime .item() has to be called on tr_loss and stores the sum of all losses
         self._total_loss_scalar = 0.0
+        self._total_cross_loss_scalar = 0.0
         self._globalstep_last_logged = self.state.global_step
 
         model.zero_grad()
@@ -2131,23 +2123,23 @@ class Trainer:
 
         total_batched_samples = 0
         for epoch in range(epochs_trained, num_train_epochs):
-            print(f"Std Epochs : {args.num_std_epochs} | Coop Epochs : {args.num_coop_epochs}")
-            if epoch >= args.num_std_epochs:
-                print("TRAINING COOPERATIVE")
-                for v in reversed(list(dict(model.named_modules()).values())):
-                   if type(v).__name__ == 'CooperativeLinear' or type(v).__name__ == 'CooperativeConv1D':
-                       v.train_cooperative = True
-                       v.initialize_prior_fine()
-                       v.weight.requires_grad = False
-                       try:
-                           v.bias.requires_grad = False
-                       except:
-                           pass
-            else:
-                print("TRAINING STANDARD")
-                for v in reversed(list(dict(model.named_modules()).values())):
-                   if type(v).__name__ == 'CooperativeLinear' or type(v).__name__ == 'CooperativeConv1D':
-                       v.train_cooperative = False
+            #print(f"Std Epochs : {args.num_std_epochs} | Coop Epochs : {args.num_coop_epochs}")
+            #if epoch >= args.num_std_epochs:
+            #    print("TRAINING COOPERATIVE")
+            #    for v in reversed(list(dict(model.named_modules()).values())):
+            #       if type(v).__name__ == 'CooperativeLinear' or type(v).__name__ == 'CooperativeConv1D':
+            #           v.train_cooperative = True
+            #           v.initialize_prior_fine()
+            #           v.weight.requires_grad = False
+            #           try:
+            #               v.bias.requires_grad = False
+            #           except:
+            #               pass
+            #else:
+            #    print("TRAINING STANDARD")
+            #    for v in reversed(list(dict(model.named_modules()).values())):
+            #       if type(v).__name__ == 'CooperativeLinear' or type(v).__name__ == 'CooperativeConv1D':
+            #           v.train_cooperative = False
             epoch_iterator = train_dataloader
             if hasattr(epoch_iterator, "set_epoch"):
                 epoch_iterator.set_epoch(epoch)
@@ -2222,6 +2214,14 @@ class Trainer:
 
                 with self.accelerator.accumulate(model):
                     tr_loss_step = self.training_step(model, inputs)
+                    var_loss = 0
+                    var_loss_times = 0
+                    for module in list(dict(model.named_modules()).values()):
+                        if type(module).__name__ == 'CooperativeLinear' or type(module).__name__ == 'CooperativeConv1D':
+                            var_loss += module.get_variational_loss()
+                            var_loss_times+=1
+                            
+                    tr_orig_loss = tr_loss_step - var_loss / max(1,var_loss_times)
 
                 if (
                     args.logging_nan_inf_filter
@@ -2230,12 +2230,14 @@ class Trainer:
                 ):
                     # if loss is nan or inf simply add the average of previous logged losses
                     tr_loss += tr_loss / (1 + self.state.global_step - self._globalstep_last_logged)
+                    tr_cross_loss += tr_orig_loss / (1 + self.state.global_step - self._globalstep_last_logged)
                 else:
                     if tr_loss.device != tr_loss_step.device:
                         raise ValueError(
                             f"Calculated loss must be on the original device: {tr_loss.device} but device in use is {tr_loss_step.device}"
                         )
                     tr_loss += tr_loss_step
+                    tr_cross_loss += tr_orig_loss
                 self.current_flos += float(self.floating_point_ops(inputs))
 
                 is_last_step_and_steps_less_than_grad_acc = (
@@ -2347,6 +2349,7 @@ class Trainer:
 
         # add remaining tr_loss
         self._total_loss_scalar += tr_loss.item()
+        self._total_cross_loss_scalar += tr_cross_loss.item()
         effective_global_step = max(self.state.global_step, 0.001)  # Avoid ZeroDivisionError
         train_loss = self._total_loss_scalar / effective_global_step
 
@@ -2360,6 +2363,7 @@ class Trainer:
         self.store_flos()
         metrics["total_flos"] = self.state.total_flos
         metrics["train_loss"] = train_loss
+        metrics["train_cross_loss"] = self._total_cross_loss_scalar / effective_global_step
 
         self.is_in_train = False
 
@@ -3167,10 +3171,15 @@ class Trainer:
 
         #print (loss)
         # getting variational loss
+        var_loss = 0
+        var_loss_times = 0
         for module in list(dict(model.named_modules()).values()):
             if type(module).__name__ == 'CooperativeLinear' or type(module).__name__ == 'CooperativeConv1D':
-                #print (module, module.get_variational_loss())
-                loss += module.get_variational_loss()
+                var_loss += module.get_variational_loss()
+                var_loss_times+=1
+
+        loss += var_loss / max(1,var_loss_times)
+
         if self.use_apex:
             with amp.scale_loss(loss, self.optimizer) as scaled_loss:
                 scaled_loss.backward()
