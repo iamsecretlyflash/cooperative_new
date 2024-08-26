@@ -797,7 +797,7 @@ def main():
         for module in list(dict(model.named_modules()).values()):
             if type(module).__name__ == 'CooperativeLinear' or type(module).__name__ == 'CooperativeConv1D':
                 module.train_cooperative = True
-                module.initialize_prior_fine()
+                # module.initialize_prior_fine() #un-comment to use cov initialization
 
         if posthoc_flag :
             for n, p in model.named_parameters():
