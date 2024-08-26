@@ -212,6 +212,12 @@ class ModelArguments:
         default="query,key,value,attention_out,intermediate,output",
         metadata={"help": "The modules applying cooperative"},
     )
+
+    posthoc_app: Optional[int] = field(
+        default=0,
+        metadata={"help": "Whether to apply posthoc or not."},
+    )
+
     sparseft_module: Optional[str] = field(
         default="query,value",
         metadata={"help": "The modules applying sparseft: query,key,value,intermediate,layer.output,attention.output"},
@@ -737,6 +743,17 @@ def main():
     # for _, p in model.named_parameters():
     #     print(p.requires_grad)
     
+    for module in list(dict(model.named_modules()).values()):
+        if type(module).__name__ == 'CooperativeLinear' or type(module).__name__ == 'CooperativeConv1D':
+            module.train_cooperative = True
+
+    posthoc_flag = model_args.posthoc_app
+    if model_args.expert_locations != '' and  training_args.num_train_epochs != training_args.num_coop_epochs:
+        training_args.num_train_epochs = training_args.num_std_epochs #training_args.num_train_epochs//2
+        for module in list(dict(model.named_modules()).values()):
+            if type(module).__name__ == 'CooperativeLinear' or type(module).__name__ == 'CooperativeConv1D':
+                module.train_cooperative = False
+    print(training_args.num_train_epochs)
     trainer = Trainer(
         model=model,
         args=training_args,
@@ -770,6 +787,56 @@ def main():
         trainer.log_metrics("train", metrics)
         trainer.save_metrics("train", metrics)
         trainer.save_state()
+
+    
+    if training_args.num_coop_epochs:
+        print("COOPERATIVE RUN")
+        training_args.num_train_epochs = training_args.num_coop_epochs #orig_num_epochs - training_args.num_train_epochs
+        print(training_args.num_train_epochs)
+        training_args.learning_rate = training_args.learning_rate * 5
+        for module in list(dict(model.named_modules()).values()):
+            if type(module).__name__ == 'CooperativeLinear' or type(module).__name__ == 'CooperativeConv1D':
+                module.train_cooperative = True
+                module.initialize_prior_fine()
+
+        if posthoc_flag :
+            for n, p in model.named_parameters():
+                if "expert_weights_prior" not in n and "std_prior" not in n:
+                    p.requires_grad = False
+
+        trainer = Trainer(
+            model=model,
+            args=training_args,
+            train_dataset=train_dataset if training_args.do_train else None,
+            eval_dataset=eval_dataset if training_args.do_eval else None,
+            compute_metrics=compute_metrics,
+            tokenizer=tokenizer,
+            data_collator=data_collator,
+            tb_writter=tb_writter,
+        )
+        # Training
+        if training_args.do_train:
+            checkpoint = None
+            if last_checkpoint is not None:
+                checkpoint = last_checkpoint
+            elif os.path.isdir(model_args.model_name_or_path):
+                # Check the config from that potential checkpoint has the right number of labels before using it as a
+                # checkpoint.
+                if AutoConfig.from_pretrained(model_args.model_name_or_path).num_labels == num_labels:
+                    checkpoint = model_args.model_name_or_path
+
+            train_result = trainer.train(resume_from_checkpoint=checkpoint)
+            metrics = train_result.metrics
+            max_train_samples = (
+                data_args.max_train_samples if data_args.max_train_samples is not None else len(train_dataset)
+            )
+            metrics["train_samples"] = min(max_train_samples, len(train_dataset))
+
+            trainer.save_model()  # Saves the tokenizer too for easy upload
+
+            trainer.log_metrics("train", metrics)
+            trainer.save_metrics("train", metrics)
+            trainer.save_state()
 
     '''
     for name, p in model.named_parameters():
