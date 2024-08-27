@@ -1,17 +1,19 @@
-CUDA_VISIBLE_DEVICES=2 python finetune.py \
+CUDA_VISIBLE_DEVICES=1 python /home/arinjay/fix/cooperative_new/coop_new/LLM-Adapters/finetune.py \
   --base_model '/home/models/llama-7b-hf' \
   --data_path 'ft-training_set/math_10k.json' \
-  --output_dir './final_trained_models/math/llama/lora_A' \
+  --output_dir './final_trained_models/math/llama/base/9e-4' \
   --batch_size 4 \
   --micro_batch_size 4 \
-  --num_epochs 5 \
+  --num_epochs 3 \
+  --num_epochs_coop 0 \
   --lora_r 32 \
-  --learning_rate 3e-5 \
+  --learning_rate 9e-4 \
+  --eval_step 2450 \
+  --save_step 2450 \
   --cutoff_len 256 \
   --val_set_size 120 \
   --adapter_name lora \
-  --save_step 200 \
   --lora_alpha 64 \
   --target_modules '[q_proj,k_proj,v_proj]' \
-  --expert_locations 'lora_A' \
+  --expert_locations '' \
   --load_8bit
