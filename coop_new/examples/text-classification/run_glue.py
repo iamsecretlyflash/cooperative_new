@@ -791,13 +791,13 @@ def main():
         print("COOPERATIVE RUN")
         training_args.num_train_epochs = training_args.num_coop_epochs
         print(training_args.num_train_epochs)
-        training_args.learning_rate = training_args.learning_rate * 5
         for module in list(dict(model.named_modules()).values()):
             if type(module).__name__ == 'CooperativeLinear' or type(module).__name__ == 'CooperativeConv1D':
                 module.train_cooperative = True
                 module.initialize_prior_fine()
 
         if posthoc_flag :
+            training_args.learning_rate = training_args.learning_rate * 5
             for n, p in model.named_parameters():
                 if "expert_weights_prior" not in n and "std_prior" not in n:
                     p.requires_grad = False
@@ -991,3 +991,4 @@ def _mp_fn(index):
 if __name__ == "__main__":
     print(os.getcwd())
     main()
+
