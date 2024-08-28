@@ -16,7 +16,7 @@ task="${tasks[$i]}"
 eval_steps="${eval_st[$i]}"
 bs="${batch[$i]}"
 lr="${learn_rate[$i]}"
-TF_CPP_MIN_LOG_LEVEL=2 TF_ENABLE_ONEDNN_OPTS=0 WANDB_PROJECT='Roberta-Cooperative-Analysis' CUDA_VISIBLE_DEVICES=1 python /home/vaibhav/Untitled/examples/text-classification/run_glue.py \
+TF_CPP_MIN_LOG_LEVEL=2 TF_ENABLE_ONEDNN_OPTS=0 WANDB_PROJECT='Roberta-Cooperative-PostHoc' CUDA_VISIBLE_DEVICES=1 python /home/arinjay/fix/cooperative_new/coop_new/examples/text-classification/run_glue.py \
 --model_name_or_path roberta-base \
 --expert_locations 'query' \
 --num_experts ${num_experts} \
