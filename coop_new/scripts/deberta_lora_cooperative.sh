@@ -39,6 +39,7 @@ TF_CPP_MIN_LOG_LEVEL=2 TF_ENABLE_ONEDNN_OPTS=1 WANDB_PROJECT='Deberta-Cooperativ
 --apply_lora \
 --lora_r ${lora_r} \
 --lora_alpha ${lora_alpha} \
---output_dir ../outputs/deberta/${task}/cooperative_lora/posthoc/${num_epochs}/${num_coop_epochs}/${kl_loss_weight}/${lr}/${lora_r}/${lora_alpha}/${num_experts} \
+--posthoc_app 0 \
+--output_dir ../outputs/deberta/${task}/cooperative_lora/posthoc/${num_epochs}/${num_coop_epochs}/${vls}/${lr}/${lora_r}/${lora_alpha}/${num_experts} \
 --overwrite_output_dir
 done
