@@ -37,9 +37,9 @@ TF_CPP_MIN_LOG_LEVEL=2 TF_ENABLE_ONEDNN_OPTS=1 WANDB_PROJECT='Roberta-Cooperativ
 --report_to wandb \
 --seed 6  \
 --apply_lora \
---lora_r 8 \
---lora_alpha 16 \
---post 0 \
+--lora_r ${lora_r} \
+--lora_alpha ${lora_alpha} \
+--posthoc_app 0 \
 --output_dir ../outputs/roberta/${task}/cooperative_lora/posthoc/${num_epochs}/${num_coop_epochs}/${vls}/${lr}/${lora_r}/${lora_alpha}/${num_experts} \
 --overwrite_output_dir
 done

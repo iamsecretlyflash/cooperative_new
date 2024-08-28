@@ -736,24 +736,22 @@ def main():
     #                                  output_as_string=True,
     #                                  output_precision=4,
     #                                  transformer_tokenizer=tokenizer)
-    print ("Number of parameters", sum(p.numel() for p in model.parameters() if p.requires_grad))
+    print ("Number of total parameters", sum(p.numel() for p in model.parameters()))
+    print ("Number of trainable parameters", sum(p.numel() for p in model.parameters() if p.requires_grad))
     #print("T5 FLOPs:%s   MACs:%s   Params:%s \n" %(flops, macs, params))
 
     # Initialize our Trainer
     # for _, p in model.named_parameters():
     #     print(p.requires_grad)
     
-    for module in list(dict(model.named_modules()).values()):
-        if type(module).__name__ == 'CooperativeLinear' or type(module).__name__ == 'CooperativeConv1D':
-            module.train_cooperative = True
-
     posthoc_flag = model_args.posthoc_app
+    training_args.num_train_epochs = training_args.num_std_epochs #training_args.num_train_epochs//2
     if model_args.expert_locations != '' and  training_args.num_train_epochs != training_args.num_coop_epochs:
-        training_args.num_train_epochs = training_args.num_std_epochs #training_args.num_train_epochs//2
         for module in list(dict(model.named_modules()).values()):
             if type(module).__name__ == 'CooperativeLinear' or type(module).__name__ == 'CooperativeConv1D':
                 module.train_cooperative = False
-    print(training_args.num_train_epochs)
+    if training_args.num_std_epochs:
+        print("Standard Run")
     trainer = Trainer(
         model=model,
         args=training_args,
@@ -791,15 +789,15 @@ def main():
     
     if training_args.num_coop_epochs:
         print("COOPERATIVE RUN")
-        training_args.num_train_epochs = training_args.num_coop_epochs #orig_num_epochs - training_args.num_train_epochs
+        training_args.num_train_epochs = training_args.num_coop_epochs
         print(training_args.num_train_epochs)
-        training_args.learning_rate = training_args.learning_rate * 5
         for module in list(dict(model.named_modules()).values()):
             if type(module).__name__ == 'CooperativeLinear' or type(module).__name__ == 'CooperativeConv1D':
                 module.train_cooperative = True
-                # module.initialize_prior_fine() #un-comment to use cov initialization
+                module.initialize_prior_fine()
 
         if posthoc_flag :
+            training_args.learning_rate = training_args.learning_rate * 5
             for n, p in model.named_parameters():
                 if "expert_weights_prior" not in n and "std_prior" not in n:
                     p.requires_grad = False
@@ -993,3 +991,4 @@ def _mp_fn(index):
 if __name__ == "__main__":
     print(os.getcwd())
     main()
+

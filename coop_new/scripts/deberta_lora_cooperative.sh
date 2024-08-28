@@ -1,8 +1,8 @@
 tasks=('mrpc' 'cola' 'rte' 'stsb' 'sst2' 'qnli' 'mnli' 'qqp')
-eval_st=(115 268 156 180 2105 3274 12272 11371)
+eval_st=(115 268 78 180 2105 3274 12272 11371)
 num_experts=4
 lr=9e-4
-batch=(32 32 16 32 32 32 32 32)
+batch=(32 32 32 32 32 32 32 32)
 sample_period=1
 max_seq_length=128
 vls=5e-3
@@ -17,7 +17,7 @@ do
 task="${tasks[$i]}"
 eval_steps="${eval_st[$i]}"
 bs="${batch[$i]}"
-TF_CPP_MIN_LOG_LEVEL=2 TF_ENABLE_ONEDNN_OPTS=1 WANDB_PROJECT='Deberta-Cooperative-PostHoc' CUDA_VISIBLE_DEVICES=2 python /home/arinjay/new_cop/cooperative_new/coop_new/examples/text-classification/run_glue.py  \
+TF_CPP_MIN_LOG_LEVEL=2 TF_ENABLE_ONEDNN_OPTS=1 WANDB_PROJECT='Deberta-Cooperative-PostHoc' CUDA_VISIBLE_DEVICES=2 python /home/arinjay/fix/cooperative_new/coop_new/examples/text-classification/run_glue.py  \
 --model_name_or_path microsoft/deberta-v3-base \
 --expert_locations 'lora_A' \
 --num_experts ${num_experts} \
@@ -39,6 +39,7 @@ TF_CPP_MIN_LOG_LEVEL=2 TF_ENABLE_ONEDNN_OPTS=1 WANDB_PROJECT='Deberta-Cooperativ
 --apply_lora \
 --lora_r ${lora_r} \
 --lora_alpha ${lora_alpha} \
---output_dir ../outputs/deberta/${task}/cooperative_lora/posthoc/${num_epochs}/${num_coop_epochs}/${kl_loss_weight}/${lr}/${lora_r}/${lora_alpha}/${num_experts} \
+--posthoc_app 0 \
+--output_dir ../outputs/deberta/${task}/cooperative_lora/posthoc/${num_epochs}/${num_coop_epochs}/${vls}/${lr}/${lora_r}/${lora_alpha}/${num_experts} \
 --overwrite_output_dir
 done
