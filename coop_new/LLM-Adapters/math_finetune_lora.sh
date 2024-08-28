@@ -1,15 +1,15 @@
 CUDA_VISIBLE_DEVICES=1 python /home/arinjay/fix/cooperative_new/coop_new/LLM-Adapters/finetune.py \
   --base_model '/home/models/llama-7b-hf' \
   --data_path 'ft-training_set/math_10k.json' \
-  --output_dir './final_trained_models/math/llama/base/9e-4' \
-  --batch_size 4 \
-  --micro_batch_size 4 \
+  --output_dir './final_trained_models/math/llama/base/3e-4' \
+  --batch_size 16 \
+  --micro_batch_size 16 \
   --num_epochs 3 \
   --num_epochs_coop 0 \
   --lora_r 32 \
-  --learning_rate 9e-4 \
-  --eval_step 2450 \
-  --save_step 2450 \
+  --learning_rate 3e-4 \
+  --eval_step 613 \
+  --save_step 613 \
   --cutoff_len 256 \
   --val_set_size 120 \
   --adapter_name lora \
