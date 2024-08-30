@@ -310,6 +310,7 @@ def train(
             group_by_length=group_by_length,
             report_to="wandb" if use_wandb else "tensorboard",
             run_name=wandb_run_name if use_wandb else None,
+            seed=6,
         ),
         data_collator=transformers.DataCollatorForSeq2Seq(
             tokenizer, pad_to_multiple_of=8, return_tensors="pt", padding=True
