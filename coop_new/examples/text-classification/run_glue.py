@@ -31,6 +31,7 @@ from typing import Optional
 import evaluate
 import numpy as np
 from datasets import load_dataset, load_metric
+from datasets import DatasetDict, Dataset
 import warnings
 warnings.filterwarnings("ignore")
 import transformers
@@ -152,6 +153,9 @@ class DataTrainingArguments:
     validation_file: Optional[str] = field(
         default=None, metadata={"help": "A csv or a json file containing the validation data."}
     )
+    test_adv_glue: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to use adversarial GLUE test set or not."}
+    )
     test_file: Optional[str] = field(default=None, metadata={"help": "A csv or a json file containing the test data."})
 
     def __post_init__(self):
@@ -164,6 +168,7 @@ class DataTrainingArguments:
         else:
             train_extension = self.train_file.split(".")[-1]
             assert train_extension in ["csv", "json"], "`train_file` should be a csv or a json file."
+            print(self.validation_file)
             validation_extension = self.validation_file.split(".")[-1]
             assert (
                 validation_extension == train_extension
@@ -341,7 +346,7 @@ def main():
     logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
     logger.setLevel(logging.INFO if is_main_process(training_args.local_rank) else logging.WARN)
     logger.info(training_args.output_dir)
-
+    
     # Log on each process the small summary:
     logger.warning(
         f"Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu}"
@@ -412,6 +417,19 @@ def main():
     # See more about loading any type of standard or custom dataset at
     # https://huggingface.co/docs/datasets/loading_datasets.html.
 
+    if data_args.test_adv_glue:
+        adv_glue = load_dataset("json", data_files = "adv_dev.json")
+        features = adv_glue['train'][data_args.task_name][0][0].keys()
+        from collections import defaultdict
+        mep = defaultdict(lambda : [])
+        for item in adv_glue['train'][data_args.task_name][0]:
+            for f in features:
+                mep[f].append(item[f])
+
+        datasets['validation'] = Dataset.from_dict(mep)
+    print(datasets)
+# convert adv_glue['train']['sst2'] format to datasets['train']['sst2'] format
+        
     # Labels
     if data_args.task_name is not None:
         is_regression = data_args.task_name == "stsb"
@@ -656,7 +674,7 @@ def main():
     # TODO: When datasets metrics include regular accuracy, make an else here and remove special branch from
     # compute_metrics
 
-    def expected_caliberation_error(samples,true_labels, M=5):
+    def expected_caliberation_error(samples,true_labels, M=10):
         bin_boundaries=torch.linspace(0,1,M+1)
         bin_lowers=bin_boundaries[:-1]
         bin_uppers=bin_boundaries[1:]
@@ -991,4 +1009,3 @@ def _mp_fn(index):
 if __name__ == "__main__":
     print(os.getcwd())
     main()
-
