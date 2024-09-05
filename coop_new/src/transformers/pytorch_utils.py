@@ -184,7 +184,7 @@ class CooperativeLinear(nn.Linear):
         #sampler.arg_constraints['scale_tril'] = constraints.greater_than(0)
         #sampler.support = constraints.lower_cholesky
         #print (sampler)
-        sample = sampler.rsample(torch.Size()).to(torch.float32)
+        sample = sampler.float32_rsample(torch.Size()).to(torch.float32)
         updated_var =  std @ sample.to(self.device) @ std.T
         updated_var = torch.diag(torch.clip(updated_var.diag(),min=eps)).to(updated_var.device).to(torch.float32)
         return updated_var
