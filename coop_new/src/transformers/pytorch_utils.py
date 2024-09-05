@@ -101,11 +101,11 @@ class CooperativeLinear(nn.Linear):
         use_entropy = True,
         sample_period = 1,
         dirichlet_prior = 1,
-        var_loss_scale = 1e-2,
+        var_loss_scale = 1e-3,
         use_averaging = True,
         averaging_factor = 0.9,
         kl_loss_weight = 1e-5,
-        train_cooperative = False,
+        train_cooperative = True,
         device = 'cuda' if torch.cuda.is_available() else 'cpu',
         **kwargs
     ):
@@ -140,13 +140,6 @@ class CooperativeLinear(nn.Linear):
         self.sample_counter = 0
         self.forward_counter = 0
 
-        mu = cp(self.weight.data)
-        if self.fan_in_fan_out == False:
-            mu = mu.T
-
-        self.updated_mu = mu
-
-        self.w = cp(self.weight.data).to(self.device)
 
     def initialize_prior_fine(self):
         
@@ -158,7 +151,7 @@ class CooperativeLinear(nn.Linear):
     def gamma(self, v):
         return torch.lgamma(v).exp()
 
-    def multivariate_reparameterization(self, mu, var2):
+    def multivariate_reparameterization(self, var2):
         # https://www.wikiwand.com/en/Multivariate_normal_distribution#Drawing_values_from_the_distribution
         sampler = MultivariateNormal(loc=torch.zeros(self.out_features).to(self.device), \
                                      covariance_matrix=torch.eye(self.out_features).to(self.device))
@@ -170,10 +163,9 @@ class CooperativeLinear(nn.Linear):
         #print (self.var_loss_scale * torch.einsum('eio,op->eip', all_vars, L))
         varsum = torch.einsum('eio,op->eip', all_vars, L)
         #print ("Varsum")
-        #print (varsum)
-        updated_mu = self.var_loss_scale * varsum + mu
+        #print (varsum
         # updated_mu = varsum + mu
-        return updated_mu
+        return self.var_loss_scale * varsum 
 
     def multivariate_kl(self, var):
         # https://statproofbook.github.io/P/mvn-kl.html
@@ -192,7 +184,7 @@ class CooperativeLinear(nn.Linear):
         #sampler.arg_constraints['scale_tril'] = constraints.greater_than(0)
         #sampler.support = constraints.lower_cholesky
         #print (sampler)
-        sample = sampler.float32_rsample(torch.Size()).to(torch.float32)
+        sample = sampler.rsample(torch.Size()).to(torch.float32)
         updated_var =  std @ sample.to(self.device) @ std.T
         updated_var = torch.diag(torch.clip(updated_var.diag(),min=eps)).to(updated_var.device).to(torch.float32)
         return updated_var
@@ -245,76 +237,24 @@ class CooperativeLinear(nn.Linear):
         return (expert_weights * expert_weights.log()).sum()/len(expert_weights)
 
     def forward(self, x):
-
-        #print ("Norm of weight difference", (self.weight.data.to(self.device) - self.w.to(self.device)).norm())
-        #print ("Weights")
-        #print (self.weight.data)
-        #print (self.std_prior)
-        #print (self.expert_weights_prior)
-
-        #print (self.training)
-        mu = cp(self.weight.data)
-        if self.fan_in_fan_out == False:
-            mu = mu.T
-
-        if self.training == True:
+        if self.training == True and self.train_cooperative == True:
             #print ("Forward count", self.forward_counter)
-            if self.train_cooperative == True:
-                gaussian_var_prior = self.wishart_reparameterization(torch.diag(self.std_prior)) #*self.var_loss_scale
-                #gaussian_var_prior = self.wishart_reparameterization(self.std_prior)
-                with torch.no_grad():
-                    self.gaussian_var_prior = gaussian_var_prior
+            gaussian_var_prior = self.wishart_reparameterization(torch.diag(self.std_prior))
+            self.gaussian_var_prior = gaussian_var_prior
+            varvar = self.multivariate_reparameterization( gaussian_var_prior)
+            updated_mu = self.weight.data.T + varvar
 
-                updated_mu = self.multivariate_reparameterization(mu, gaussian_var_prior)
+            updated_mu = torch.nan_to_num(updated_mu, nan=0.0)
 
-                updated_mu = torch.nan_to_num(updated_mu, nan=0.0)
+            expert_weights = self.dirichlet_reparameterization(nn.Sigmoid()(self.expert_weights_prior))
+            expert_weights = nn.Sigmoid()(expert_weights)
+            expert_weights = expert_weights/expert_weights.sum()
 
-                expert_weights = self.dirichlet_reparameterization(nn.Sigmoid()(self.expert_weights_prior))
-                expert_weights = nn.Sigmoid()(expert_weights)
-                expert_weights = expert_weights/expert_weights.sum()
+            updated_mu = torch.nan_to_num(torch.einsum('i,ijk->jk', expert_weights, updated_mu), nan = 0)
+            self.expert_weights = expert_weights
+            self.weight.data = updated_mu.T
 
-                updated_mu = torch.einsum('i,ijk->jk', expert_weights, updated_mu)
-
-                if self.use_averaging == True:
-                    if self.sample_counter > 1:
-                        with torch.no_grad():
-                            self.updated_mu = 1/self.sample_counter * (torch.nan_to_num(updated_mu, nan=0.0) + (self.sample_counter - 1)*self.updated_mu)
-                            #self.updated_mu = self.averaging_factor * torch.nan_to_num(updated_mu, nan=0.0) + (1-self.averaging_factor)*self.updated_mu
-                    else:
-                        with torch.no_grad():
-                            self.updated_mu = torch.nan_to_num(updated_mu, nan=0.0)
-                else:
-                    with torch.no_grad():
-                        self.updated_mu = torch.nan_to_num(updated_mu, nan=0.0)
-                with torch.no_grad():
-                    self.expert_weights = expert_weights
-
-                #print (x.device, self.updated_mu.device)
-                if self.fan_in_fan_out == False:
-                    #print (F.linear(x, mu.T, self.bias))
-                    res = F.linear(x, self.updated_mu.T, self.bias)
-                else:
-                    #print (F.linear(x, mu.T, self.bias))
-                    res = F.linear(x, self.updated_mu, self.bias)
-            else:
-                if self.fan_in_fan_out == False:
-                    res = F.linear(x, mu.T, self.bias)
-                else:
-                    res = F.linear(x, mu, self.bias)
-
-                self.updated_mu = mu
-
-            self.forward_counter += 1
-
-            return res
-        else:
-            self.updated_mu=self.updated_mu.to(x.device)
-            if self.fan_in_fan_out == False:
-                res = F.linear(x, self.updated_mu.T, self.bias)
-            else:
-                res = F.linear(x, self.updated_mu, self.bias)
-
-            return res
+        return F.linear(x, self.weight, self.bias)
 
     def eval(self):
         self.training = False
