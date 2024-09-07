@@ -2218,10 +2218,13 @@ class Trainer:
                     var_loss_times = 0
                     for module in list(dict(model.named_modules()).values()):
                         if type(module).__name__ == 'CooperativeLinear' or type(module).__name__ == 'CooperativeConv1D':
-                            var_loss += module.get_variational_loss()
+                            try:
+                                var_loss += module.get_variational_loss().detach()
+                            except:
+                                pass
                             var_loss_times+=1
                             
-                    tr_orig_loss = tr_loss_step - var_loss / max(1,var_loss_times)
+                    tr_orig_loss = tr_loss_step - (var_loss / max(1,var_loss_times))/self.args.gradient_accumulation_steps
 
                 if (
                     args.logging_nan_inf_filter
@@ -2297,7 +2300,7 @@ class Trainer:
                     self.state.epoch = epoch + (step + 1 + steps_skipped) / steps_in_epoch
                     self.control = self.callback_handler.on_step_end(args, self.state, self.control)
 
-                    self._maybe_log_save_evaluate(tr_loss, grad_norm, model, trial, epoch, ignore_keys_for_eval)
+                    self._maybe_log_save_evaluate(tr_loss, grad_norm, model, trial, epoch, ignore_keys_for_eval, tr_cross_loss)
                 else:
                     self.control = self.callback_handler.on_substep_end(args, self.state, self.control)
 
@@ -2317,7 +2320,7 @@ class Trainer:
                 self.control.should_training_stop = True
 
             self.control = self.callback_handler.on_epoch_end(args, self.state, self.control)
-            self._maybe_log_save_evaluate(tr_loss, grad_norm, model, trial, epoch, ignore_keys_for_eval)
+            self._maybe_log_save_evaluate(tr_loss, grad_norm, model, trial, epoch, ignore_keys_for_eval, tr_cross_loss)
 
             if DebugOption.TPU_METRICS_DEBUG in self.args.debug:
                 if is_torch_xla_available():
@@ -2352,6 +2355,7 @@ class Trainer:
         self._total_cross_loss_scalar += tr_cross_loss.item()
         effective_global_step = max(self.state.global_step, 0.001)  # Avoid ZeroDivisionError
         train_loss = self._total_loss_scalar / effective_global_step
+        cross_loss_fin = self._total_cross_loss_scalar / effective_global_step
 
         metrics = speed_metrics(
             "train",
@@ -2363,7 +2367,7 @@ class Trainer:
         self.store_flos()
         metrics["total_flos"] = self.state.total_flos
         metrics["train_loss"] = train_loss
-        metrics["train_cross_loss"] = self._total_cross_loss_scalar / effective_global_step
+        metrics["train_cross_loss"] = cross_loss_fin
 
         self.is_in_train = False
 
@@ -2657,7 +2661,7 @@ class Trainer:
                 f"There were unexpected keys in the checkpoint model loaded: {load_result.unexpected_keys}."
             )
 
-    def _maybe_log_save_evaluate(self, tr_loss, grad_norm, model, trial, epoch, ignore_keys_for_eval):
+    def _maybe_log_save_evaluate(self, tr_loss, grad_norm, model, trial, epoch, ignore_keys_for_eval, cross_loss = None):
         if self.control.should_log and self.state.global_step > self._globalstep_last_logged:
             if is_torch_xla_available():
                 xm.mark_step()
@@ -2665,17 +2669,23 @@ class Trainer:
             logs: Dict[str, float] = {}
 
             # all_gather + mean() to get average loss over all processes
+            print(tr_loss)
+            print(cross_loss)
             tr_loss_scalar = self._nested_gather(tr_loss).mean().item()
-
             # reset tr_loss to zero
             tr_loss -= tr_loss
-
+            cross_loss_scalar = 0
             logs["loss"] = round(tr_loss_scalar / (self.state.global_step - self._globalstep_last_logged), 4)
+            if cross_loss is not None:
+                cross_loss_scalar = self._nested_gather(cross_loss).mean().item()
+                cross_loss -= cross_loss
+                logs["cross_loss"] = round(cross_loss_scalar / (self.state.global_step - self._globalstep_last_logged), 4)
             if grad_norm is not None:
                 logs["grad_norm"] = grad_norm.detach().item() if isinstance(grad_norm, torch.Tensor) else grad_norm
             logs["learning_rate"] = self._get_learning_rate()
 
             self._total_loss_scalar += tr_loss_scalar
+            self._total_cross_loss_scalar += cross_loss_scalar
             self._globalstep_last_logged = self.state.global_step
             self.store_flos()
 
