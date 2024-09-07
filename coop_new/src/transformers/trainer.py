@@ -2669,8 +2669,6 @@ class Trainer:
             logs: Dict[str, float] = {}
 
             # all_gather + mean() to get average loss over all processes
-            print(tr_loss)
-            print(cross_loss)
             tr_loss_scalar = self._nested_gather(tr_loss).mean().item()
             # reset tr_loss to zero
             tr_loss -= tr_loss
