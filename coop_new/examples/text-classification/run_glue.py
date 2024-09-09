@@ -30,8 +30,8 @@ from dataclasses import dataclass, field
 from typing import Optional
 import evaluate
 import numpy as np
+from copy import deepcopy as cp
 from datasets import load_dataset, load_metric
-from datasets import DatasetDict, Dataset
 import warnings
 warnings.filterwarnings("ignore")
 import transformers
@@ -80,13 +80,18 @@ task_to_keys = {
     "rte": ("sentence1", "sentence2"),
     "sst2": ("sentence", None),
     "stsb": ("sentence1", "sentence2"),
-    "wnli": ("sentence1", "sentence2"),
-    "wic": ("sentence1", "sentence2"),  # 6,000
-    "boolq": ("passage", "question"),   # 9,427
+    "wnli": ("sentence1", "sentence2"),#SuperGLUE tasks below
+    "wic": ("sentence1", "sentence2"),
+    "boolq": ("passage", "question"),
     "cb": ("premise","hypothesis"),
     "axg": ("premise","hypothesis"),
     "axb": ("sentence1","sentence2"),
-    "copa": ("premise","choice1","choice2","question")
+    "copa": ("premise","choice1","choice2","question"),#AdvGLUE tasks below
+    "adv_mnli": ("premise","hypothesis"),
+    "adv_qnli": ("question","sentence"),
+    "adv_qqp" : ("question1","question2"),
+    "adv_rte" : ("sentence1","sentence2"),
+    "adv_sst2" : ("sentence", None)
 
 
 
@@ -104,6 +109,10 @@ class DataTrainingArguments:
     into argparse arguments to be able to specify them on
     the command line.
     """
+    use_adv: Optional[bool] = field(
+        default=False,
+        metadata={"help": "Argument to decide whether to evaluate on advGLUE or not"},
+    )
 
     task_name: Optional[str] = field(
         default=None,
@@ -153,9 +162,6 @@ class DataTrainingArguments:
     validation_file: Optional[str] = field(
         default=None, metadata={"help": "A csv or a json file containing the validation data."}
     )
-    test_adv_glue: Optional[bool] = field(
-        default=False, metadata={"help": "Whether to use adversarial GLUE test set or not."}
-    )
     test_file: Optional[str] = field(default=None, metadata={"help": "A csv or a json file containing the test data."})
 
     def __post_init__(self):
@@ -168,7 +174,6 @@ class DataTrainingArguments:
         else:
             train_extension = self.train_file.split(".")[-1]
             assert train_extension in ["csv", "json"], "`train_file` should be a csv or a json file."
-            print(self.validation_file)
             validation_extension = self.validation_file.split(".")[-1]
             assert (
                 validation_extension == train_extension
@@ -346,7 +351,7 @@ def main():
     logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
     logger.setLevel(logging.INFO if is_main_process(training_args.local_rank) else logging.WARN)
     logger.info(training_args.output_dir)
-    
+
     # Log on each process the small summary:
     logger.warning(
         f"Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu}"
@@ -383,10 +388,18 @@ def main():
     if data_args.task_name in ['mrpc','rte','cola','stsb','qnli','mnli','qqp','sst2','wnli']:
         # Downloading and loading a dataset from the hub.
         datasets = load_dataset("glue", data_args.task_name)
+        if data_args.use_adv == True:
+            if data_args.task_name in ['rte','sst2','qnli','mnli','qqp']:
+                adv_dataset=load_dataset("AI-Secure/adv_glue","adv_"+data_args.task_name)
+                test_true_label=cp(adv_dataset["validation"]["label"][:])
+                adv_dataset=adv_dataset.map(lambda example: {"label":-1}, num_proc=None)
+                datasets["test"]=adv_dataset["validation"]
+            else:
+                raise ValueError("AdvGLUE only available for 'rte','sst2','qnli','mnli','qqp'")
     
     elif data_args.task_name in ['cb','wic','boolq','axg','axb','copa']:
         datasets = load_dataset("super_glue", data_args.task_name)
-    
+        
     else:
         # Loading a dataset from your local files.
         # CSV/JSON training and evaluation files are needed.
@@ -417,19 +430,6 @@ def main():
     # See more about loading any type of standard or custom dataset at
     # https://huggingface.co/docs/datasets/loading_datasets.html.
 
-    if data_args.test_adv_glue:
-        adv_glue = load_dataset("json", data_files = "adv_dev.json")
-        features = adv_glue['train'][data_args.task_name][0][0].keys()
-        from collections import defaultdict
-        mep = defaultdict(lambda : [])
-        for item in adv_glue['train'][data_args.task_name][0]:
-            for f in features:
-                mep[f].append(item[f])
-
-        datasets['validation'] = Dataset.from_dict(mep)
-    print(datasets)
-# convert adv_glue['train']['sst2'] format to datasets['train']['sst2'] format
-        
     # Labels
     if data_args.task_name is not None:
         is_regression = data_args.task_name == "stsb"
@@ -982,7 +982,7 @@ def main():
 
         for test_dataset, task in zip(test_datasets, tasks):
             # Removing the `label` columns because it contains -1 and Trainer won't like that.
-            test_dataset.remove_columns_("label")
+            test_dataset.remove_columns("label")
             predictions = trainer.predict(test_dataset=test_dataset).predictions
             predictions = np.squeeze(predictions) if is_regression else np.argmax(predictions, axis=1)
 
@@ -1009,3 +1009,4 @@ def _mp_fn(index):
 if __name__ == "__main__":
     print(os.getcwd())
     main()
+
