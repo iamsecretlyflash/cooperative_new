@@ -15,6 +15,7 @@
 import importlib
 import math
 import re
+import os
 import warnings
 from dataclasses import asdict, dataclass, field
 from enum import Enum
@@ -30,6 +31,9 @@ from ..utils import PeftConfig, PeftType, transpose
 from torch.distributions.multivariate_normal import MultivariateNormal
 from copy import deepcopy as cp
 
+
+print(os.getcwd())
+print("MMEKMEKNEIJWBR")
 def is_bnb_available():
     return importlib.util.find_spec("bitsandbytes") is not None
 
@@ -354,7 +358,7 @@ class Linear(nn.Linear, LoraLayer):
             if 'lora_B' in self.cooperative_modules:
                 self.lora_B = CooperativeLinear(r, out_features, bias=False, num_experts=num_experts, use_entropy=use_entropy,
                                                 use_averaging=use_averaging, sample_period = sample_period, var_loss_scale=var_loss_scale, \
-                                                kl_loss_weight=kl_loss_weight, train_cooperative=train_cooperative)
+                                                kl_loss_weight=kl_loss_weight, train_cooperative=train_cooperative, transpose_sampling = True)
             else:
                 self.lora_B = nn.Linear(r, out_features, bias=False)
             self.scaling = self.lora_alpha / self.r
@@ -397,9 +401,6 @@ class Linear(nn.Linear, LoraLayer):
 
     def forward(self, x: torch.Tensor):
         previous_dtype = self.weight.dtype
-
-        if x.isnan().any():
-            print("NAN")
         if self.disable_adapters:
             if self.r > 0 and self.merged:
                 matmul_output = self.lora_B.weight @ self.lora_A.weight
@@ -414,11 +415,9 @@ class Linear(nn.Linear, LoraLayer):
                 lora_A_res = self.lora_A(lora_dropout_res)
                 if lora_A_res.isnan().any():
                     print("lora_A gave NaNs")
-                    print(lora_A_res)
                 lora_B_res = self.lora_B(lora_A_res)
                 if lora_B_res.isnan().any():
                     print("lora_B gave NaNs")
-                    print(lora_B_res)
                 result += lora_B_res * self.scaling
         else:
              result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
@@ -597,7 +596,7 @@ if is_bnb_available():
                 if 'lora_B' in self.cooperative_modules:
                     self.lora_B = CooperativeLinear(r, out_features, bias=False, num_experts=num_experts, use_entropy=use_entropy,
                                                     use_averaging=use_averaging, sample_period = sample_period, var_loss_scale=var_loss_scale, \
-                                                    kl_loss_weight=kl_loss_weight, train_cooperative=train_cooperative)
+                                                    kl_loss_weight=kl_loss_weight, train_cooperative=train_cooperative, transpose_sampling = True)
                 else:
                     self.lora_B = nn.Linear(r, out_features, bias=False)
 
