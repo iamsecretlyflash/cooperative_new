@@ -46,6 +46,7 @@ def train(
         num_epochs: int = 3,
         num_epochs_coop: int = 0,
         learning_rate: float = 3e-4,
+        learning_rate_coop: float = -1,
         cutoff_len: int = 256,
         val_set_size: int = 2000,
         use_gradient_checkpointing: bool = False,
@@ -75,6 +76,7 @@ def train(
         wandb_watch: str = "",  # options: false | gradients | all
         wandb_log_model: str = "",  # options: false | true
         resume_from_checkpoint: str = None,  # either training checkpoint or final adapter
+        posthoc_app = 0,
 ):
     num_epochs_std = num_epochs - num_epochs_coop
     print(
@@ -95,7 +97,8 @@ def train(
         f"lora_alpha: {lora_alpha}\n"
         f"lora_dropout: {lora_dropout}\n"
         f"lora_target_modules: {lora_target_modules}\n"
-        #f"coooperative_modules: {cooperative_modules}\n"
+        f"expert_locations: {expert_locations}\n"
+        f"posthoc_app: {posthoc_app}\n"
         f"number of experts: {num_experts}\n"
         f"use entropy loss: {use_entropy}\n"
         f"bottleneck_size: {bottleneck_size}\n"
@@ -265,7 +268,7 @@ def train(
     print(model)
     if val_set_size > 0:
         train_val = data["train"].train_test_split(
-            test_size=val_set_size, shuffle=True, seed=42
+            test_size=val_set_size, shuffle=True, seed=6
         )
         train_data = (
             train_val["train"].shuffle().map(generate_and_tokenize_prompt)
@@ -283,58 +286,142 @@ def train(
         model.model_parallel = True
 
     eps = learning_rate*1e-3
+
+    assert(
+        num_epochs_std + num_epochs_coop == num_epochs
+    ), "num_epochs_std + num_epochs_coop must equal num_epochs"
     
-    trainer = transformers.Trainer(
-        model=model,
-        train_dataset=train_data,
-        eval_dataset=val_data,
-        args=transformers.TrainingArguments(
-            per_device_train_batch_size=micro_batch_size,
-            gradient_accumulation_steps=gradient_accumulation_steps,
-            warmup_steps=100,
-            num_train_epochs=num_epochs,
-            num_coop_epochs = num_epochs_coop,
-            num_std_epochs = num_epochs_std,
-            learning_rate=learning_rate,
-            fp16=True,
-            logging_steps=10,
-            optim="adamw_torch",
-            evaluation_strategy="steps" if val_set_size > 0 else "no",
-            save_strategy="steps",
-            eval_steps=eval_step if val_set_size > 0 else None,
-            save_steps=save_step,
-            output_dir=output_dir,
-            save_total_limit=10,
-            load_best_model_at_end=True if val_set_size > 0 else False,
-            ddp_find_unused_parameters=False if ddp else None,
-            group_by_length=group_by_length,
-            report_to="wandb" if use_wandb else "tensorboard",
-            run_name=wandb_run_name if use_wandb else None,
-            seed=6,
-        ),
-        data_collator=transformers.DataCollatorForSeq2Seq(
-            tokenizer, pad_to_multiple_of=8, return_tensors="pt", padding=True
-        ),
-    )
-    model.config.use_cache = False
-
-    old_state_dict = model.state_dict
-    model.state_dict = (
-        lambda self, *_, **__: get_peft_model_state_dict(
-            self, old_state_dict()
+    if num_epochs_std:
+        trainer = transformers.Trainer(
+            model=model,
+            train_dataset=train_data,
+            eval_dataset=val_data,
+            args=transformers.TrainingArguments(
+                per_device_train_batch_size=micro_batch_size,
+                gradient_accumulation_steps=gradient_accumulation_steps,
+                warmup_steps=100,
+                num_train_epochs=num_epochs_std,
+                learning_rate=learning_rate,
+                fp16=False,
+                logging_steps=10,
+                optim="adamw_torch",
+                evaluation_strategy="steps" if val_set_size > 0 else "no",
+                save_strategy="steps",
+                eval_steps=eval_step if val_set_size > 0 else None,
+                save_steps=save_step,
+                output_dir=output_dir,
+                save_total_limit=10,
+                load_best_model_at_end=True if val_set_size > 0 else False,
+                ddp_find_unused_parameters=False if ddp else None,
+                group_by_length=group_by_length,
+                report_to="wandb" if use_wandb else "tensorboard",
+                run_name=wandb_run_name if use_wandb else None,
+                seed=6,
+            ),
+            data_collator=transformers.DataCollatorForSeq2Seq(
+                tokenizer, pad_to_multiple_of=8, return_tensors="pt", padding=True
+            ),
         )
-    ).__get__(model, type(model))
+        model.config.use_cache = False
 
-    if torch.__version__ >= "2" and sys.platform != "win32":
-        model = torch.compile(model)
+        old_state_dict = model.state_dict
+        model.state_dict = (
+            lambda self, *_, **__: get_peft_model_state_dict(
+                self, old_state_dict()
+            )
+        ).__get__(model, type(model))
 
-    trainer.train(resume_from_checkpoint=resume_from_checkpoint)
+        if torch.__version__ >= "2" and sys.platform != "win32":
+            model = torch.compile(model)
 
-    model.save_pretrained(output_dir)
+        trainer.train(resume_from_checkpoint=resume_from_checkpoint)
 
-    print(
-        "\n If there's a warning about missing keys above, please disregard :)"
-    )
+        model.save_pretrained(output_dir)
+
+        print(
+            "\n If there's a warning about missing keys above, please disregard :)"
+        )
+
+    if num_epochs_coop:
+        print(train_data.__len__())
+        if val_set_size > 0:
+            train_val = data["train"].train_test_split(
+                test_size=val_set_size, shuffle=True, seed=6
+            )
+            train_data = (
+                train_val["train"].shuffle().map(generate_and_tokenize_prompt)
+            )
+            val_data = (
+                train_val["test"].shuffle().map(generate_and_tokenize_prompt)
+            )
+        else:
+            train_data = data["train"].shuffle().map(generate_and_tokenize_prompt)
+            val_data = None
+        print("COOPERATIVE RUN")
+        for module in list(dict(model.named_modules()).values()):
+            if type(module).__name__ == 'CooperativeLinear' or type(module).__name__ == 'CooperativeConv1D':
+                module.train_cooperative = True
+                module.initialize_prior_fine()
+        if learning_rate_coop == -1:
+                learning_rate *= 5
+        else:
+            learning_rate = learning_rate_coop
+
+        if posthoc_app :
+            for n, p in model.named_parameters():
+                if "expert_weights_prior" not in n and "std_prior" not in n:
+                    p.requires_grad = False
+        print("Learning rate: ", learning_rate)
+        trainer = transformers.Trainer(
+            model=model,
+            train_dataset=train_data,
+            eval_dataset=val_data,
+            args=transformers.TrainingArguments(
+                per_device_train_batch_size=micro_batch_size,
+                gradient_accumulation_steps=gradient_accumulation_steps,
+                warmup_steps=100,
+                num_train_epochs=num_epochs_coop,
+                learning_rate=learning_rate,
+                fp16=False,
+                logging_steps=10,
+                optim="adamw_torch",
+                evaluation_strategy="steps" if val_set_size > 0 else "no",
+                save_strategy="steps",
+                eval_steps=eval_step if val_set_size > 0 else None,
+                save_steps=save_step,
+                output_dir=output_dir,
+                save_total_limit=10,
+                load_best_model_at_end=True if val_set_size > 0 else False,
+                ddp_find_unused_parameters=False if ddp else None,
+                group_by_length=group_by_length,
+                report_to="wandb" if use_wandb else "tensorboard",
+                run_name=wandb_run_name if use_wandb else None,
+                seed=6,
+            ),
+            data_collator=transformers.DataCollatorForSeq2Seq(
+                tokenizer, pad_to_multiple_of=8, return_tensors="pt", padding=True
+            ),
+        )
+        model.config.use_cache = False
+
+        old_state_dict = model.state_dict
+        model.state_dict = (
+            lambda self, *_, **__: get_peft_model_state_dict(
+                self, old_state_dict()
+            )
+        ).__get__(model, type(model))
+
+        if torch.__version__ >= "2" and sys.platform != "win32":
+            model = torch.compile(model)
+
+        trainer.train(resume_from_checkpoint=resume_from_checkpoint)
+
+        model.save_pretrained(output_dir)
+
+        print(
+            "\n If there's a warning about missing keys above, please disregard :)"
+        )
+
 
 
 def generate_prompt(data_point):
