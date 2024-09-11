@@ -65,7 +65,7 @@ def main(
         s = generation_output.sequences
         outputs = tokenizer.batch_decode(s, skip_special_tokens=True)
         outputs = [o.split("### Response:")[1].strip() for o in outputs]
-        print("Output is ", outputs)
+        print(outputs)
         return outputs
 
     save_file = f'experiment/{args.model}-{args.adapter}-{args.dataset}.json'

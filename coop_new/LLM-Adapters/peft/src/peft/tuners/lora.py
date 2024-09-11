@@ -92,7 +92,7 @@ class LoraConfig(PeftConfig):
     use_averaging: bool = field(default=False, metadata={"help": "True if averaring of mus if required"})
     sample_period: int = field(default = 1, metadata={"help":"Take samples at every nth (sample period) step"})
     kl_loss_weight: float = field(default=1e-5, metadata={"help": "KL loss weight"})
-    train_cooperative: bool = field(default=True, metadata={"help": "Whether to train the cooperative module"})
+    train_cooperative: bool = field(default=False, metadata={"help": "Whether to train the cooperative module"})
     def __post_init__(self):
         self.peft_type = PeftType.LORA
 
@@ -327,7 +327,7 @@ class Linear(nn.Linear, LoraLayer):
         sample_period = 1,
         use_averaging: bool = True,
         kl_loss_weight: float = 5e-3,
-        train_cooperative: bool = True,
+        train_cooperative: bool = False,
         **kwargs,
     ):
         nn.Linear.__init__(self, in_features, out_features, **kwargs)

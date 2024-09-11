@@ -396,9 +396,6 @@ def main():
                 datasets["test"]=adv_dataset["validation"]
             else:
                 raise ValueError("AdvGLUE only available for 'rte','sst2','qnli','mnli','qqp'")
-        print(datasets["train"])
-        print(datasets["validation"])
-        print(datasets["test"])
     
     elif data_args.task_name in ['cb','wic','boolq','axg','axb','copa']:
         datasets = load_dataset("super_glue", data_args.task_name)
@@ -979,14 +976,14 @@ def main():
         # Loop to handle MNLI double evaluation (matched, mis-matched)
         tasks = [data_args.task_name]
         test_datasets = [test_dataset]
-        if data_args.task_name == "mnli" and data_args.use_adv==False:
+        if data_args.task_name == "mnli":
             tasks.append("mnli-mm")
             test_datasets.append(datasets["test_mismatched"])
 
         for test_dataset, task in zip(test_datasets, tasks):
             # Removing the `label` columns because it contains -1 and Trainer won't like that.
             test_dataset.remove_columns("label")
-            predictions = trainer.predict(test_dataset=test_dataset,metric_key_prefix="predict").predictions
+            predictions = trainer.predict(test_dataset=test_dataset).predictions
             predictions = np.squeeze(predictions) if is_regression else np.argmax(predictions, axis=1)
 
             output_test_file = os.path.join(training_args.output_dir, f"test_results_{task}.txt")
