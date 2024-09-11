@@ -1,4 +1,6 @@
-# Copyright 2022 The HuggingFace Team. All rights reserved.
+#!/usr/bin/env python
+# coding=utf-8
+# Copyright 2020 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,691 +13,931 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import inspect
-from typing import Callable, List, Optional, Set, Tuple, Union
-import warnings
-
+""" Finetuning the library models for sequence classification on GLUE."""
+# You can also adapt this script on your own text classification task. Pointers for this are left as comments.
+import math
+import logging
+import os
+os.environ['CURL_CA_BUNDLE'] = ''
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+#os.environ["WANDB_PROJECT"] = "PEFT-GLUE"
+import random
+import sys
+import json 
 import torch
-from torch.distributions.multivariate_normal import MultivariateNormal
-from torch.distributions.wishart import Wishart
-from torch.distributions.dirichlet import Dirichlet
-from torch.distributions.gamma import Gamma
-from torch import nn
-import torch.nn.functional as F
-from torch.distributions import constraints
+import torch.nn as nn
+from dataclasses import dataclass, field
+from typing import Optional
+import evaluate
+import numpy as np
+from datasets import load_dataset, load_metric
+from datasets import DatasetDict, Dataset
+import warnings
+warnings.filterwarnings("ignore")
+import transformers
+from transformers import (
+    AutoConfig,
+    AutoModelForSequenceClassification,
+    AutoTokenizer,
+    DataCollatorWithPadding,
+    EvalPrediction,
+    HfArgumentParser,
+    PretrainedConfig,
+    Trainer,
+    TrainingArguments,
+    default_data_collator,
+    set_seed,
+)
+from transformers.trainer_utils import get_last_checkpoint, is_main_process
+from transformers.utils import check_min_version
 
-from copy import deepcopy as cp
+try:
+    from torch.utils.tensorboard import SummaryWriter
+except ImportError:
+    from tensorboardX import SummaryWriter
 
-from packaging import version
-from safetensors.torch import storage_ptr, storage_size
-from torch import nn
+from calflops import calculate_flops
 
-from .utils import is_torch_xla_available, logging
+from peft import (  # noqa: E402
+    LoraConfig,
+    BottleneckConfig,
+    PrefixTuningConfig,
+    get_peft_model,
+    get_peft_model_state_dict,
+    prepare_model_for_int8_training,
+    set_peft_model_state_dict,
+)
+
+# Will error if the minimal version of Transformers is not installed. Remove at your own risks.
+check_min_version("4.4.0")
+
+task_to_keys = {
+    "cola": ("sentence", None),
+    "mnli": ("premise", "hypothesis"),
+    "mrpc": ("sentence1", "sentence2"),
+    "qnli": ("question", "sentence"),
+    "qqp": ("question1", "question2"),
+    "rte": ("sentence1", "sentence2"),
+    "sst2": ("sentence", None),
+    "stsb": ("sentence1", "sentence2"),
+    "wnli": ("sentence1", "sentence2"),
+    "wic": ("sentence1", "sentence2"),  #SuperGLUE tasks below
+    "boolq": ("passage", "question"),   
+    "cb": ("premise","hypothesis"),
+    "axg": ("premise","hypothesis"),
+    "axb": ("sentence1","sentence2"),
+    "copa": ("premise","choice1","choice2","question"), #AdvGLUE tasks below
+    "adv_mnli": ("premise","hypothesis"),
+    "adv_qnli": ("question","sentence"),
+    "adv_qqp" : ("question1","question2"),
+    "adv_rte" : ("sentence1","sentence2"),
+    "adv_sst2" : ("sentence", None)
+}
+
+logger = logging.getLogger(__name__)
 
 
-ALL_LAYERNORM_LAYERS = [nn.LayerNorm]
-
-logger = logging.get_logger(__name__)
-eps = 1e-5
-
-parsed_torch_version_base = version.parse(version.parse(torch.__version__).base_version)
-
-is_torch_greater_or_equal_than_2_2 = parsed_torch_version_base >= version.parse("2.2")
-is_torch_greater_or_equal_than_2_1 = parsed_torch_version_base >= version.parse("2.1")
-is_torch_greater_or_equal_than_2_0 = parsed_torch_version_base >= version.parse("2.0")
-is_torch_greater_or_equal_than_1_13 = parsed_torch_version_base >= version.parse("1.13")
-is_torch_greater_or_equal_than_1_12 = parsed_torch_version_base >= version.parse("1.12")
-
-
-def softmax_backward_data(parent, grad_output, output, dim, self):
+@dataclass
+class DataTrainingArguments:
     """
-    A function that calls the internal `_softmax_backward_data` PyTorch method and that adjusts the arguments according
-    to the torch version detected.
+    Arguments pertaining to what data we are going to input our model for training and eval.
+
+    Using `HfArgumentParser` we can turn this class
+    into argparse arguments to be able to specify them on
+    the command line.
     """
 
-    from torch import _softmax_backward_data
+    task_name: Optional[str] = field(
+        default=None,
+        metadata={"help": "The name of the task to train on: " + ", ".join(task_to_keys.keys())},
+    )
+    max_seq_length: int = field(
+        default=128,
+        metadata={
+            "help": "The maximum total input sequence length after tokenization. Sequences longer "
+            "than this will be truncated, sequences shorter will be padded."
+        },
+    )
+    overwrite_cache: bool = field(
+        default=False, metadata={"help": "Overwrite the cached preprocessed datasets or not."}
+    )
+    pad_to_max_length: bool = field(
+        default=True,
+        metadata={
+            "help": "Whether to pad all samples to `max_seq_length`. "
+            "If False, will pad the samples dynamically when batching to the maximum length in the batch."
+        },
+    )
+    max_train_samples: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": "For debugging purposes or quicker training, truncate the number of training examples to this "
+            "value if set."
+        },
+    )
+    max_val_samples: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": "For debugging purposes or quicker training, truncate the number of validation examples to this "
+            "value if set."
+        },
+    )
+    max_test_samples: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": "For debugging purposes or quicker training, truncate the number of test examples to this "
+            "value if set."
+        },
+    )
+    train_file: Optional[str] = field(
+        default=None, metadata={"help": "A csv or a json file containing the training data."}
+    )
+    validation_file: Optional[str] = field(
+        default=None, metadata={"help": "A csv or a json file containing the validation data."}
+    )
+    test_adv_glue: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to use adversarial GLUE test set or not."}
+    )
+    test_file: Optional[str] = field(default=None, metadata={"help": "A csv or a json file containing the test data."})
 
-    return _softmax_backward_data(grad_output, output, parent.dim, self.dtype)
-
-
-def prune_linear_layer(layer: nn.Linear, index: torch.LongTensor, dim: int = 0) -> nn.Linear:
-    """
-    Prune a linear layer to keep only entries in index.
-
-    Used to remove heads.
-
-    Args:
-        layer (`torch.nn.Linear`): The layer to prune.
-        index (`torch.LongTensor`): The indices to keep in the layer.
-        dim (`int`, *optional*, defaults to 0): The dimension on which to keep the indices.
-
-    Returns:
-        `torch.nn.Linear`: The pruned layer as a new layer with `requires_grad=True`.
-    """
-    index = index.to(layer.weight.device)
-    W = layer.weight.index_select(dim, index).clone().detach()
-    if layer.bias is not None:
-        if dim == 1:
-            b = layer.bias.clone().detach()
+    def __post_init__(self):
+        if self.task_name is not None:
+            self.task_name = self.task_name.lower()
+            if self.task_name not in task_to_keys.keys():
+                raise ValueError("Unknown task, you should pick one in " + ",".join(task_to_keys.keys()))
+        elif self.train_file is None or self.validation_file is None:
+            raise ValueError("Need either a GLUE task or a training/validation file.")
         else:
-            b = layer.bias[index].clone().detach()
-    new_size = list(layer.weight.size())
-    new_size[dim] = len(index)
-    new_layer = nn.Linear(new_size[1], new_size[0], bias=layer.bias is not None).to(layer.weight.device)
-    new_layer.weight.requires_grad = False
-    new_layer.weight.copy_(W.contiguous())
-    new_layer.weight.requires_grad = True
-    if layer.bias is not None:
-        new_layer.bias.requires_grad = False
-        new_layer.bias.copy_(b.contiguous())
-        new_layer.bias.requires_grad = True
-    return new_layer
-
-class CooperativeLinear(nn.Linear):
-    def __init__(
-        self,
-        in_features: int,
-        out_features: int,
-        num_experts: int,
-        fan_in_fan_out : bool = False,
-        use_entropy = True,
-        sample_period = 1,
-        dirichlet_prior = 1,
-        var_loss_scale = 1e-3,
-        use_averaging = True,
-        averaging_factor = 0.9,
-        kl_loss_weight = 1e-5,
-        train_cooperative = True,
-        device = 'cuda' if torch.cuda.is_available() else 'cpu',
-        **kwargs
-    ):
-        nn.Linear.__init__(self, in_features, out_features, **kwargs)
-
-        self.num_experts = num_experts
-        self.in_features = in_features
-        self.out_features = out_features
-        self.fan_in_fan_out = fan_in_fan_out
-        self.use_entropy = use_entropy
-        self.device = device
-        self.sample_period = sample_period
-        self.use_averaging = use_averaging
-        self.kl_loss_weight = kl_loss_weight
-
-        self.train_cooperative = train_cooperative
-
-        self.wishart_df = out_features
-        self.wishert_prior = torch.eye(out_features)
-        self.dirichlet_prior = dirichlet_prior
-        self.var_loss_scale = var_loss_scale
-
-        self.expert_weights_prior = nn.Parameter(-dirichlet_prior + 2*dirichlet_prior * torch.rand(num_experts))
-
-        self.std_prior = nn.Parameter(torch.rand(out_features))
-        self.prior_initialised = False
-
-        nn.init.uniform_(self.expert_weights_prior)
-        nn.init.uniform_(self.std_prior)
-
-        self.averaging_factor = averaging_factor
-        self.sample_counter = 0
-        self.forward_counter = 0
+            train_extension = self.train_file.split(".")[-1]
+            assert train_extension in ["csv", "json"], "`train_file` should be a csv or a json file."
+            print(self.validation_file)
+            validation_extension = self.validation_file.split(".")[-1]
+            assert (
+                validation_extension == train_extension
+            ), "`validation_file` should have the same extension (csv or json) as `train_file`."
 
 
-    def initialize_prior_fine(self):
-        
-        # self.std_prior = nn.Parameter(self.weight.cov())
-        if not self.prior_initialised:
-            self.std_prior = nn.Parameter(((self.weight.cov()).diag()).sqrt()).to(self.device)
-            self.prior_initialised = True
-
-    def gamma(self, v):
-        return torch.lgamma(v).exp()
-
-    def multivariate_reparameterization(self, var2):
-        # https://www.wikiwand.com/en/Multivariate_normal_distribution#Drawing_values_from_the_distribution
-        sampler = MultivariateNormal(loc=torch.zeros(self.out_features).to(self.device), \
-                                     covariance_matrix=torch.eye(self.out_features).to(self.device))
-        all_vars = sampler.sample((self.num_experts, self.in_features)).to(self.device)
-        #print (var2, var2.dtype)
-        #print (var2.to(torch.float32))
-        L = torch.linalg.cholesky(var2).to(var2.dtype)
-        #L = torch.linalg.cholesky(var2)
-        #print (self.var_loss_scale * torch.einsum('eio,op->eip', all_vars, L))
-        varsum = torch.einsum('eio,op->eip', all_vars, L)
-        #print ("Varsum")
-        #print (varsum
-        # updated_mu = varsum + mu
-        return self.var_loss_scale * varsum 
-
-    def multivariate_kl(self, var):
-        # https://statproofbook.github.io/P/mvn-kl.html
-        # log-sum inequality - https://mat.hjg.com.ar/tic/img/lecture3.pdf
-        #var = std @ std.T
-        #return self.num_experts * self.in_features * 0.5 * (var.trace() - torch.log(var.det()) - self.out_features)
-        return self.num_experts * 0.5 * (var.trace() - torch.log(var).trace() - self.out_features)
-
-    def wishart_reparameterization(self, std):
-        #dtype = std.dtype
-        #std = std.float()
-        #max_try_correction = 3 if torch._C._get_tracing_state() else 10
-
-        # http://sfb649.wiwi.hu-berlin.de/fedc_homepage/xplore/tutorials/mvahtmlnode40.html
-        sampler = Wishart(df=self.wishart_df, scale_tril=torch.eye(self.out_features).to(self.device))
-        #sampler.arg_constraints['scale_tril'] = constraints.greater_than(0)
-        #sampler.support = constraints.lower_cholesky
-        #print (sampler)
-        sample = sampler.float32_rsample(torch.Size()).to(torch.float32)
-        updated_var =  std @ sample.to(self.device) @ std.T
-        updated_var = torch.diag(torch.clip(updated_var.diag(),min=eps)).to(updated_var.device).to(torch.float32)
-        return updated_var
-
-    def wishart_kl(self, std):
-        #var = self.var_loss_scale**2 * (std @ std.T)
-        var = (std @ std.T)
-        var = torch.diag(var.diag()).to(var.device)
-        #print (var)
-        #return 0.5 * (-torch.log(var.det())*self.wishart_df + var.trace()*self.wishart_df - self.wishart_df**2)
-        return 0.5 * (-torch.log(var).trace()*self.wishart_df + var.trace()*self.wishart_df - self.wishart_df**2)
-
-    def dirichlet_reparameterization(self, alpha2):
-        # https://arxiv.org/pdf/1703.01488
-        sampler = MultivariateNormal(loc=torch.zeros(self.num_experts).to(self.device), \
-                                     covariance_matrix=torch.eye(self.num_experts).to(self.device))
-        sample = sampler.sample().to(self.device)
-        mu = torch.log(alpha2) - 1/self.num_experts * torch.log(alpha2).sum()
-        sigma = torch.diag(1/alpha2 * (1 - 2/self.num_experts) + 1/(self.num_experts ** 2) * (1/alpha2).sum())
-        return torch.linalg.cholesky(sigma) @ sample + mu
-
-    def dirichlet_kl(self, alpha2):
-        # https://statproofbook.github.io/P/dir-kl.html
-        alpha1 = torch.tensor([self.dirichlet_prior]*self.num_experts).to(self.device)
-        kld = torch.log(self.gamma(alpha2.sum())/self.gamma(alpha1.sum())) + (torch.log(self.gamma(alpha2)/self.gamma(alpha1))).sum() + \
-              ((alpha2 - alpha1)*(torch.digamma(alpha2) - torch.digamma(alpha2.sum()))).sum()
-        return kld
-
-    def get_variational_loss(self):
-        #print (self.training)
-        if self.train_cooperative == True and self.training == True:
-            #print ("KL Loss weight", self.kl_loss_weight)
-            # kld of product of independent variables - http://www.math.tau.ac.il/~mansour/advanced-agt+ml/scribe5-lower-bound-MAB.pdf
-            kl1 = self.dirichlet_kl(self.expert_weights_prior)
-            kl2 = self.wishart_kl(torch.diag(self.std_prior))
-            #kl2 = self.wishart_kl(self.std_prior)
-            kl3 = self.multivariate_kl(self.gaussian_var_prior)
-
-            if self.use_entropy == True:
-                loss4 = self.calculate_entropy(self.expert_weights)
-                return self.kl_loss_weight*(kl1 + kl2 + kl3) + loss4
-                #return loss4
-            else:
-                return self.kl_loss_weight * (kl1 + kl2 + kl3)
-                #return 0
-        else:
-            return 0
-
-    def calculate_entropy(self, expert_weights):
-        return (expert_weights * expert_weights.log()).sum()/len(expert_weights)
-
-    def forward(self, x):
-        if self.training == True and self.train_cooperative == True:
-            #print ("Forward count", self.forward_counter)
-            gaussian_var_prior = self.wishart_reparameterization(torch.diag(self.std_prior))
-            self.gaussian_var_prior = gaussian_var_prior
-            varvar = self.multivariate_reparameterization( gaussian_var_prior)
-            updated_mu = self.weight.data.T + varvar
-
-            updated_mu = torch.nan_to_num(updated_mu, nan=0.0)
-
-            expert_weights = self.dirichlet_reparameterization(nn.Sigmoid()(self.expert_weights_prior))
-            expert_weights = nn.Sigmoid()(expert_weights)
-            expert_weights = expert_weights/expert_weights.sum()
-
-            updated_mu = torch.nan_to_num(torch.einsum('i,ijk->jk', expert_weights, updated_mu), nan = 0)
-            self.expert_weights = expert_weights
-            self.weight.data = updated_mu.T
-
-        return F.linear(x, self.weight, self.bias)
-
-    def eval(self):
-        self.training = False
-
-class CooperativeLinear_V1(nn.Linear):
-    def __init__(
-        self,
-        in_features: int,
-        out_features: int,
-        num_experts: int,
-        fan_in_fan_out : bool = False,
-        log_variance_init = -10,
-        single_variance = False,
-        var_loss_scale = 1e-1,
-        use_entropy = False,
-        weight_normalization = 'Softmax',
-        expert_weight_init = -1,
-        inference_mixing_coeff = 1,
-        sample_period = 1,
-        **kwargs
-    ):
-        self.num_experts = num_experts
-        self.in_features = in_features
-        self.out_features = out_features
-        self.fan_in_fan_out = fan_in_fan_out
-        self.var_loss_scale = var_loss_scale
-        self.weight_normalization = weight_normalization
-        self.use_entropy = use_entropy
-
-        nn.Linear.__init__(self, in_features, out_features, **kwargs)
-
-        self.scale = 1 #nn.Parameter(torch.ones(1))
-        self.cons_scale = 1
-        self.single_variance = single_variance
-        self.log_variance_init = log_variance_init
-        if not single_variance:
-            self.logvar = nn.Parameter((0.5 + torch.rand(num_experts,out_features)/2)*(log_variance_init))
-        else:
-            self.logvar = nn.Parameter((0.5 + torch.rand(out_features)/2)*(log_variance_init))
-        self.expert_weights = nn.Parameter(-expert_weight_init + 2*expert_weight_init * torch.rand(num_experts))
-        if weight_normalization == 'Softmax':
-            self.weight_normalizer = nn.Softmax()
-        else:
-            self.weight_normalizer = nn.Sigmoid()
-        self.last_var_param = None
-        self.inference_mixing_coeff = inference_mixing_coeff
-        self.var_param = None
-        self.sample_counter = 0
-        self.sample_period = sample_period
-
-    def forward(self, x):
-        if self.training:
-            mu = cp(self.weight.data)
-
-            if self.fan_in_fan_out == False:
-                mu = mu.T
-            if self.sample_counter == 0:
-                self.sample_counter = (self.sample_counter + 1) % self.sample_period
-                if self.single_variance:
-                    var = torch.diag(self.logvar.exp() * self.scale* self.cons_scale).to(x.device)
-                else:
-                    var = torch.stack([torch.diag(i.exp()* self.scale) for i in self.logvar]).to(x.device)
-                sampler = MultivariateNormal(torch.zeros(self.out_features).to(x.device), torch.eye(self.out_features).to(x.device))
-                all_vars = sampler.sample((self.num_experts, self.in_features)).to(x.device)
-                all_vars = all_vars @ var
-
-                all_vars += mu
-                expert_weights = self.weight_normalizer(self.expert_weights).to(x.device)
-                expert_weights = expert_weights/expert_weights.sum()
-
-                var_param = torch.einsum('i,ijk->jk', expert_weights, all_vars)
-                self.var_param = torch.nan_to_num(var_param, nan=0.0)
-
-            if self.fan_in_fan_out == False:
-                res = F.linear(x, self.var_param.T, self.bias)
-            else:
-                res = F.linear(x, self.var_param, self.bias)
-            if self.inference_mixing_coeff == 1:
-                self.last_var_param = self.var_parama
-            elif self.inference_mixing_coeff > 0 and self.inference_mixing_coeff < 1:
-                if self.last_var_param is None:
-                    self.last_var_param = self.var_param
-                else:
-                    self.last_var_param = self.var_param * self.inference_mixing_coeff + self.last_var_param * (1- self.inference_mixing_coeff)
-
-            #if torch.isnan(var_param).max() == True:
-            #    print ("variance", var)
-            #    print ("param", var_param)
-            #    print ("out", res)
-
-            return res
-        else:
-            if self.last_var_param is not None:
-                mu = self.last_var_param.to(x.device).T
-            else:
-                mu = self.weight.data
-
-            if self.fan_in_fan_out == False:
-                mu = mu.T
-
-            if self.fan_in_fan_out == False:
-                res = F.linear(x, mu.T, self.bias)
-            else:
-                res = F.linear(x, mu, self.bias)
-            return res
-
-    def eval(self):
-        self.training = False
-
-    def get_variational_loss(self):
-        expert_weights = self.weight_normalizer(self.expert_weights)
-        expert_weight_loss = expert_weights/expert_weights.sum()
-        expert_logvar = self.logvar
-        loss = ((2 * expert_logvar.sum() - expert_logvar.exp().square().sum())) * expert_weights.sum()
-        if self.use_entropy:
-            expert_weight_loss = (expert_weight_loss * expert_weight_loss.log() ).sum()
-            loss += expert_weight_loss
-        return self.var_loss_scale * loss
-
-
-    # def get_variational_loss(self):
-    #     expert_weights = self.weight_normalizer(self.expert_weights)
-    #     expert_weight_loss = expert_weights/expert_weights.sum()
-    #     loss = ((2 * self.logvar.sum() - self.logvar.exp().square().sum())) * expert_weights.sum()
-    #     if self.use_entropy:
-    #         expert_weight_loss = (expert_weight_loss * expert_weight_loss.log() ).sum()
-    #         loss += expert_weight_loss
-    #     return self.var_loss_scale * loss
-
-class Conv1D(nn.Module):
+@dataclass
+class ModelArguments:
     """
-    1D-convolutional layer as defined by Radford et al. for OpenAI GPT (and also used in GPT-2).
-
-    Basically works like a linear layer but the weights are transposed.
-
-    Args:
-        nf (`int`): The number of output features.
-        nx (`int`): The number of input features.
+    Arguments pertaining to which model/config/tokenizer we are going to fine-tune from.
     """
 
-    def __init__(self, nf, nx):
-        super().__init__()
-        self.nf = nf
-        self.weight = nn.Parameter(torch.empty(nx, nf))
-        self.bias = nn.Parameter(torch.zeros(nf))
-        nn.init.normal_(self.weight, std=0.02)
+    model_name_or_path: str = field(
+        metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
+    )
+    config_name: Optional[str] = field(
+        default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
+    )
+    tokenizer_name: Optional[str] = field(
+        default=None, metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"}
+    )
+    cache_dir: Optional[str] = field(
+        default=None,
+        metadata={"help": "Where do you want to store the pretrained models downloaded from huggingface.co"},
+    )
+    use_fast_tokenizer: bool = field(
+        default=True,
+        metadata={"help": "Whether to use one of the fast tokenizer (backed by the tokenizers library) or not."},
+    )
+    model_revision: str = field(
+        default="main",
+        metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
+    )
+    use_auth_token: bool = field(
+        default=False,
+        metadata={
+            "help": "Will use the token generated when running `transformers-cli login` (necessary to use this script "
+            "with private models)."
+        },
+    )
+    freeze_base: Optional[bool] = field(
+        default=False,
+        metadata={"help": "To freeze the weights of the base model"},
+    )
+    expert_locations: Optional[str] = field(
+        default="query,key,value,attention_out,intermediate,output",
+        metadata={"help": "The modules applying cooperative"},
+    )
 
-    def forward(self, x):
-        size_out = x.size()[:-1] + (self.nf,)
-        x = torch.addmm(self.bias, x.view(-1, x.size(-1)), self.weight)
-        x = x.view(size_out)
-        return x
+    posthoc_app: Optional[int] = field(
+        default=0,
+        metadata={"help": "Whether to apply posthoc or not."},
+    )
 
-class CooperativeConv1D(Conv1D):
-    """
-    1D-convolutional layer as defined by Radford et al. for OpenAI GPT (and also used in GPT-2).
+    sparseft_module: Optional[str] = field(
+        default="query,value",
+        metadata={"help": "The modules applying sparseft: query,key,value,intermediate,layer.output,attention.output"},
+    )
+    
+    apply_lora: Optional[bool] = field(
+        default=False,
+        metadata={"help": "Whether to apply LoRA or not."},
+    )
+    lora_module: Optional[str] = field(
+        default="query,key,value,intermediate,layer.output,attention.output",
+        metadata={"help": "The modules applying lora: query,key,value,intermediate,layer.output,attention.output"},
+    )
+    lora_alpha: Optional[int] = field(
+        default=16,
+        metadata={"help": "LoRA alpha"},
+    )
+    lora_r: Optional[int] = field(
+        default=None,
+        metadata={"help": "LoRA r"},
+    )
 
-    Basically works like a linear layer but the weights are transposed.
+    num_experts : Optional[int] = field(
+        default=4,
+        metadata={"help": "number of experts"}
+    )
 
-    Args:
-        nf (`int`): The number of output features.
-        nx (`int`): The number of input features.
-    """
+    sample_period : Optional[int] = field(
+        default=1,
+        metadata={"help": "number of sampling steps"}
+    )
+    var_loss_scale : Optional[float] = field(
+        default=1e-2,
+        metadata={"help": "scaling constant for variance sampling"}
+    )
+    use_entropy : Optional[bool] = field(
+        default=False,
+        metadata={"help": "Use Entropy Loss or Not"}
+    )
 
-    def __init__(self, nf, nx,
-                 num_experts = 4,
-                 log_variance_init = -10,
-                 single_variance = False,
-                 var_loss_scale = 1e-7,
-                 use_entropy = False,
-                 weight_normalization = 'Sigmoid',
-                 expert_weight_init = -1,
-                inference_mixing_coeff = 1,):
-        super().__init__(nx, nf)
-        self.nf = nf
-        self.weight = nn.Parameter(torch.empty(nx, nf))
-        self.bias = nn.Parameter(torch.zeros(nf))
-        self.var_loss_scale = var_loss_scale
-        self.use_entropy = use_entropy
-        self.weight_normalization = weight_normalization
-        self.num_experts = num_experts
-        self.single_variance = single_variance
-        self.out_features = nf
-        self.in_features = nx
-        self.last_var_param = None
-        self.inference_mixing_coeff = inference_mixing_coeff
+    use_averaging : Optional[bool] = field(
+        default=False,
+        metadata={"help": "Use averaring of sampled mus"}
+    )
 
-        if not single_variance:
-            self.logvar = nn.Parameter((0.5 + torch.rand(num_experts,nf)/2)*(log_variance_init))
-        else:
-            self.logvar = nn.Parameter((0.5 + torch.rand(nf)/2)*(log_variance_init))
-        self.expert_weights = nn.Parameter(-expert_weight_init + 2*expert_weight_init * torch.rand(num_experts))
-        if weight_normalization == 'Softmax':
-            self.weight_normalizer = nn.Softmax()
-        else:
-            self.weight_normalizer = nn.Sigmoid()
+    averaging_factor: Optional[float] = field(
+        default=0.1,
+        metadata={"help": "Exponential averaging factor"}
+    )
 
-        nn.init.normal_(self.weight, std=0.02)
+    kl_loss_weight: Optional[float] = field(
+        default=1,
+        metadata={"help": "Factor to multiply the KL divergence loss"}
+    )
 
-    def forward(self, x):
+    init_warmup: Optional[int] = field(
+        default=4500,
+        metadata={"help": "Total steps of inital warmup"},
+    )
+    final_warmup: Optional[int] = field(
+        default=12000,
+        metadata={"help": "Total steps of final fine-tuning"},
+    )
+    tb_writter_loginterval: Optional[int] = field(
+        default=500,
+        metadata={"help": "The logging interval for tb_writter."},
+    )
 
-        if self.training or (not self.training and (self.inference_mixing_coeff == -1)):
-            mu = cp(self.weight.data)
-
-            if self.fan_in_fan_out == False:
-                mu = mu.T
-
-            if self.single_variance:
-                var = torch.diag(self.logvar.exp() * self.scale* self.cons_scale).to(x.device)
-            else:
-                var = torch.stack([torch.diag(i.exp()* self.scale) for i in self.logvar]).to(x.device)
-            sampler = MultivariateNormal(torch.zeros(self.out_features).to(x.device), torch.eye(self.out_features).to(x.device))
-            all_vars = sampler.sample((self.num_experts, self.in_features)).to(x.device)
-            all_vars = all_vars @ var
-
-            all_vars += mu
-            expert_weights = self.weight_normalizer(self.expert_weights).to(x.device)
-            expert_weights = expert_weights/expert_weights.sum()
-
-            var_param = torch.einsum('i,ijk->jk', expert_weights, all_vars)
-            var_param = torch.nan_to_num(var_param, nan=0.0)
-
-            size_out = x.size()[:-1] + (self.nf,)
-            res = torch.addmm(self.bias, x.view(-1, x.size(-1)), var_param)
-            res = x.view(size_out)
-
-            if self.inference_mixing_coeff == 1:
-                self.last_var_param = var_param.to('cpu')
-            elif self.inference_mixing_coeff > 0 and self.inference_mixing_coeff < 1:
-                if self.last_var_param is None:
-                    self.last_var_param = var_param.to('cpu')
-                else:
-                    self.last_var_param = var_param.to('cpu') * self.inference_mixing_coeff + self.last_var_param.to('cpu') * (1- self.inference_mixing_coeff)
-            return res
-        else:
-            if self.last_var_param is not None:
-                mu = self.last_var_param.to(x.device).T
-            else:
-                mu = self.weight.data
-
-            size_out = x.size()[:-1] + (self.nf,)
-            res = torch.addmm(self.bias, x.view(-1, x.size(-1)), mu)
-            res = x.view(size_out)
-            return res
-
-    def get_variational_loss(self):
-        expert_weights = self.weight_normalizer(self.expert_weights)
-        expert_weight_loss = expert_weights/expert_weights.sum()
-        loss = ((2 * self.logvar.sum() - self.logvar.exp().square().sum())) * expert_weights.sum()
-        if self.use_entropy:
-            expert_weight_loss = (expert_weight_loss * expert_weight_loss.log() ).sum()
-            loss += expert_weight_loss
-        return self.var_loss_scale * loss
-
-
-def prune_conv1d_layer(layer: Conv1D, index: torch.LongTensor, dim: int = 1) -> Conv1D:
-    """
-    Prune a Conv1D layer to keep only entries in index. A Conv1D work as a Linear layer (see e.g. BERT) but the weights
-    are transposed.
-
-    Used to remove heads.
-
-    Args:
-        layer ([`~pytorch_utils.Conv1D`]): The layer to prune.
-        index (`torch.LongTensor`): The indices to keep in the layer.
-        dim (`int`, *optional*, defaults to 1): The dimension on which to keep the indices.
-
-    Returns:
-        [`~pytorch_utils.Conv1D`]: The pruned layer as a new layer with `requires_grad=True`.
-    """
-    index = index.to(layer.weight.device)
-    W = layer.weight.index_select(dim, index).clone().detach()
-    if dim == 0:
-        b = layer.bias.clone().detach()
+    
+def main():
+    # See all possible arguments in src/transformers/training_args.py
+    # or by passing the --help flag to this script.
+    # We now keep distinct sets of args, for a cleaner separation of concerns.
+    print(os.getcwd())
+    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
+    if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
+        # If we pass only one argument to the script and it's the path to a json file,
+        # let's parse it to get our arguments.
+        model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
     else:
-        b = layer.bias[index].clone().detach()
-    new_size = list(layer.weight.size())
-    new_size[dim] = len(index)
-    new_layer = Conv1D(new_size[1], new_size[0]).to(layer.weight.device)
-    new_layer.weight.requires_grad = False
-    new_layer.weight.copy_(W.contiguous())
-    new_layer.weight.requires_grad = True
-    new_layer.bias.requires_grad = False
-    new_layer.bias.copy_(b.contiguous())
-    new_layer.bias.requires_grad = True
-    return new_layer
+        model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+    # torch.use_deterministic_algorithms(training_args.use_deterministic_algorithms)
+    # logger.info("use_deterministic_algorithms: " + str(torch.are_deterministic_algorithms_enabled()))
 
+    # Setup output dir 
+    os.makedirs(training_args.output_dir, exist_ok=True)
+    training_args.output_dir = os.path.join(training_args.output_dir, "model")
+    os.makedirs(training_args.output_dir, exist_ok=True)
+    training_args.logging_dir = os.path.join(training_args.output_dir, "log")
+    os.makedirs(training_args.logging_dir, exist_ok=True)
+    #training_args.run_name = training_args.output_dir 
 
-def prune_layer(
-    layer: Union[nn.Linear, Conv1D], index: torch.LongTensor, dim: Optional[int] = None
-) -> Union[nn.Linear, Conv1D]:
-    """
-    Prune a Conv1D or linear layer to keep only entries in index.
+    if "debug" in training_args.output_dir:
+        import ipdb
+        ipdb.set_trace()
 
-    Used to remove heads.
+    # Detecting last checkpoint.
+    last_checkpoint = None
+    if os.path.isdir(training_args.output_dir) and training_args.do_train and not training_args.overwrite_output_dir:
+        last_checkpoint = get_last_checkpoint(training_args.output_dir)
+        if last_checkpoint is None and len(os.listdir(training_args.output_dir)) > 0:
+            raise ValueError(
+                f"Output directory ({training_args.output_dir}) already exists and is not empty. "
+                "Use --overwrite_output_dir to overcome."
+            )
+        elif last_checkpoint is not None:
+            logger.info(
+                f"Checkpoint detected, resuming training at {last_checkpoint}. To avoid this behavior, change "
+                "the `--output_dir` or add `--overwrite_output_dir` to train from scratch."
+            )
+    
 
-    Args:
-        layer (`Union[torch.nn.Linear, Conv1D]`): The layer to prune.
-        index (`torch.LongTensor`): The indices to keep in the layer.
-        dim (`int`, *optional*): The dimension on which to keep the indices.
+    # Setup logging
+    logging.basicConfig(
+        filename= os.path.join(training_args.output_dir, 'log.txt'), filemode='a',
+        format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
+        datefmt="%m/%d/%Y %H:%M:%S",
+        level=logging.INFO if is_main_process(training_args.local_rank) else logging.WARN, 
+        # handlers=[logging.StreamHandler(sys.stdout)],
+    )
+    logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
+    logger.setLevel(logging.INFO if is_main_process(training_args.local_rank) else logging.WARN)
+    logger.info(training_args.output_dir)
 
-    Returns:
-        `torch.nn.Linear` or [`~pytorch_utils.Conv1D`]: The pruned layer as a new layer with `requires_grad=True`.
-    """
-    if isinstance(layer, nn.Linear):
-        return prune_linear_layer(layer, index, dim=0 if dim is None else dim)
-    elif isinstance(layer, Conv1D):
-        return prune_conv1d_layer(layer, index, dim=1 if dim is None else dim)
+    # Log on each process the small summary:
+    logger.warning(
+        f"Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu}"
+        + f"distributed training: {bool(training_args.local_rank != -1)}, 16-bits training: {training_args.fp16}"
+    )
+    # Set the verbosity to info of the Transformers logger (on main process only):
+    if is_main_process(training_args.local_rank):
+        transformers.utils.logging.set_verbosity_info()
+        transformers.utils.logging.enable_default_handler()
+        transformers.utils.logging.enable_explicit_format()
+    logger.info(f"Training/evaluation parameters {training_args}")
+
+    # Set tb_writter 
+    if is_main_process(training_args.local_rank):
+        tb_writter = SummaryWriter(log_dir=training_args.logging_dir)
     else:
-        raise ValueError(f"Can't prune layer of class {layer.__class__}")
+        tb_writter = None
 
+    # Set seed before initializing model.
+    set_seed(training_args.seed)
 
-def apply_chunking_to_forward(
-    forward_fn: Callable[..., torch.Tensor], chunk_size: int, chunk_dim: int, *input_tensors
-) -> torch.Tensor:
-    """
-    This function chunks the `input_tensors` into smaller input tensor parts of size `chunk_size` over the dimension
-    `chunk_dim`. It then applies a layer `forward_fn` to each chunk independently to save memory.
+    # Get the datasets: you can either provide your own CSV/JSON training and evaluation files (see below)
+    # or specify a GLUE benchmark task (the dataset will be downloaded automatically from the datasets Hub).
+    #
+    # For CSV/JSON files, this script will use as labels the column called 'label' and as pair of sentences the
+    # sentences in columns called 'sentence1' and 'sentence2' if such column exists or the first two columns not named
+    # label if at least two columns are provided.
+    #
+    # If the CSVs/JSONs contain only one non-label column, the script does single sentence classification on this
+    # single column. You can easily tweak this behavior (see below)
+    #
+    # In distributed training, the load_dataset function guarantee that only one local process can concurrently
+    # download the dataset.
+    if data_args.task_name in ['mrpc','rte','cola','stsb','qnli','mnli','qqp','sst2','wnli']:
+        # Downloading and loading a dataset from the hub.
+        datasets = load_dataset("glue", data_args.task_name)
+    
+    elif data_args.task_name in ['cb','wic','boolq','axg','axb','copa']:
+        datasets = load_dataset("super_glue", data_args.task_name)
+    
+    else:
+        # Loading a dataset from your local files.
+        # CSV/JSON training and evaluation files are needed.
+        data_files = {"train": data_args.train_file, "validation": data_args.validation_file}
 
-    If the `forward_fn` is independent across the `chunk_dim` this function will yield the same result as directly
-    applying `forward_fn` to `input_tensors`.
+        # Get the test dataset: you can provide your own CSV/JSON test file (see below)
+        # when you use `do_predict` without specifying a GLUE benchmark task.
+        if training_args.do_predict:
+            if data_args.test_file is not None:
+                train_extension = data_args.train_file.split(".")[-1]
+                test_extension = data_args.test_file.split(".")[-1]
+                assert (
+                    test_extension == train_extension
+                ), "`test_file` should have the same extension (csv or json) as `train_file`."
+                data_files["test"] = data_args.test_file
+            else:
+                raise ValueError("Need either a GLUE task or a test file for `do_predict`.")
 
-    Args:
-        forward_fn (`Callable[..., torch.Tensor]`):
-            The forward function of the model.
-        chunk_size (`int`):
-            The chunk size of a chunked tensor: `num_chunks = len(input_tensors[0]) / chunk_size`.
-        chunk_dim (`int`):
-            The dimension over which the `input_tensors` should be chunked.
-        input_tensors (`Tuple[torch.Tensor]`):
-            The input tensors of `forward_fn` which will be chunked
+        for key in data_files.keys():
+            logger.info(f"load a local file for {key}: {data_files[key]}")
 
-    Returns:
-        `torch.Tensor`: A tensor with the same shape as the `forward_fn` would have given if applied`.
+        if data_args.train_file.endswith(".csv"):
+            # Loading a dataset from local csv files
+            datasets = load_dataset("csv", data_files=data_files)
+        else:
+            # Loading a dataset from local json files
+            datasets = load_dataset("json", data_files=data_files)
+    # See more about loading any type of standard or custom dataset at
+    # https://huggingface.co/docs/datasets/loading_datasets.html.
 
+    
+    print(datasets)
+    # Labels
+    if data_args.task_name is not None:
+        is_regression = data_args.task_name == "stsb"
+        if not is_regression:
+            label_list = datasets["train"].features["label"].names
+            num_labels = len(label_list)
+        else:
+            num_labels = 1
+    else:
+        # Trying to have good defaults here, don't hesitate to tweak to your needs.
+        is_regression = datasets["train"].features["label"].dtype in ["float32", "float64"]
+        if is_regression:
+            num_labels = 1
+        else:
+            # A useful fast method:
+            # https://huggingface.co/docs/datasets/package_reference/main_classes.html#datasets.Dataset.unique
+            label_list = datasets["train"].unique("label")
+            label_list.sort()  # Let's sort it for determinism
+            num_labels = len(label_list)
 
-    Examples:
-
-    ```python
-    # rename the usual forward() fn to forward_chunk()
-    def forward_chunk(self, hidden_states):
-        hidden_states = self.decoder(hidden_states)
-        return hidden_states
-
-
-    # implement a chunked forward function
-    def forward(self, hidden_states):
-        return apply_chunking_to_forward(self.forward_chunk, self.chunk_size_lm_head, self.seq_len_dim, hidden_states)
-    ```"""
-
-    assert len(input_tensors) > 0, f"{input_tensors} has to be a tuple/list of tensors"
-
-    # inspect.signature exist since python 3.5 and is a python method -> no problem with backward compatibility
-    num_args_in_forward_chunk_fn = len(inspect.signature(forward_fn).parameters)
-    if num_args_in_forward_chunk_fn != len(input_tensors):
-        raise ValueError(
-            f"forward_chunk_fn expects {num_args_in_forward_chunk_fn} arguments, but only {len(input_tensors)} input "
-            "tensors are given"
+    # Load pretrained model and tokenizer
+    #
+    # In distributed training, the .from_pretrained methods guarantee that only one local process can concurrently
+    # download model & vocab.
+    if model_args.apply_lora == False:
+        config = AutoConfig.from_pretrained(
+            model_args.config_name if model_args.config_name else model_args.model_name_or_path,
+            num_labels=num_labels,
+            finetuning_task=data_args.task_name,
+            cache_dir=model_args.cache_dir,
+            revision=model_args.model_revision,
+            use_auth_token=True if model_args.use_auth_token else None,
+            expert_locations=model_args.expert_locations,
+            num_experts=model_args.num_experts,
+            sample_period=model_args.sample_period,
+            var_loss_scale = model_args.var_loss_scale,
+            use_entropy = model_args.use_entropy,
+            use_averaging = model_args.use_averaging,
+            kl_loss_weight = model_args.kl_loss_weight,
+            apply_lora=model_args.apply_lora,
+            lora_module=model_args.lora_module, 
+            lora_alpha=model_args.lora_alpha,
+            lora_r=model_args.lora_r,    
+        )
+    else:
+        config = AutoConfig.from_pretrained(
+            model_args.config_name if model_args.config_name else model_args.model_name_or_path,
+            num_labels=num_labels,
+            finetuning_task=data_args.task_name,
+            cache_dir=model_args.cache_dir,
+            revision=model_args.model_revision,
+            use_auth_token=True if model_args.use_auth_token else None,
+            expert_locations="",
+            num_experts=model_args.num_experts,
+            sample_period=model_args.sample_period,
+            var_loss_scale = model_args.var_loss_scale,
+            use_entropy = model_args.use_entropy,
+            use_averaging = model_args.use_averaging,
+            kl_loss_weight = model_args.kl_loss_weight
         )
 
-    if chunk_size > 0:
-        tensor_shape = input_tensors[0].shape[chunk_dim]
-        for input_tensor in input_tensors:
-            if input_tensor.shape[chunk_dim] != tensor_shape:
-                raise ValueError(
-                    f"All input tenors have to be of the same shape: {tensor_shape}, "
-                    f"found shape {input_tensor.shape[chunk_dim]}"
-                )
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_args.tokenizer_name if model_args.tokenizer_name else model_args.model_name_or_path,
+        cache_dir=model_args.cache_dir,
+        use_fast=model_args.use_fast_tokenizer,
+        revision=model_args.model_revision,
+        use_auth_token=True if model_args.use_auth_token else None,
+    )
 
-        if input_tensors[0].shape[chunk_dim] % chunk_size != 0:
-            raise ValueError(
-                f"The dimension to be chunked {input_tensors[0].shape[chunk_dim]} has to be a multiple of the chunk "
-                f"size {chunk_size}"
-            )
+    model = AutoModelForSequenceClassification.from_pretrained(
+        model_args.model_name_or_path,
+        from_tf=bool(".ckpt" in model_args.model_name_or_path),
+        config=config,
+        cache_dir=model_args.cache_dir,
+        revision=model_args.model_revision,
+        use_auth_token=True if model_args.use_auth_token else None,
+    )
 
-        num_chunks = input_tensors[0].shape[chunk_dim] // chunk_size
+    print (model)
 
-        # chunk input tensor into tuples
-        input_tensors_chunks = tuple(input_tensor.chunk(num_chunks, dim=chunk_dim) for input_tensor in input_tensors)
-        # apply forward fn to every tuple
-        output_chunks = tuple(forward_fn(*input_tensors_chunk) for input_tensors_chunk in zip(*input_tensors_chunks))
-        # concatenate output at same dimension
-        return torch.cat(output_chunks, dim=chunk_dim)
+    trainable_params = []
 
-    return forward_fn(*input_tensors)
+    if model_args.apply_lora:
+        config = LoraConfig(
+            r=model_args.lora_r,
+            lora_alpha=model_args.lora_alpha,
+            target_modules=['query_proj', 'key_proj', 'value_proj',\
+                            'attention.output.dense','intermediate.dense','output.dense'],
+            bias="none",
+            task_type="TOKEN_CLS",
+            cooperative_modules=model_args.expert_locations,
+            num_experts=model_args.num_experts,
+            sample_period=model_args.sample_period,
+            var_loss_scale = model_args.var_loss_scale,
+            use_entropy = model_args.use_entropy,
+            use_averaging=model_args.use_averaging,
+            kl_loss_weight=model_args.kl_loss_weight,
+            lora_dropout=0.1
+        )
+        model = get_peft_model(model, config)
+        model.print_trainable_parameters()
 
+        #if model_args.lora_path is not None:
+        #    lora_state_dict = torch.load(model_args.lora_path)
+        #    logger.info(f"Apply LoRA state dict from {model_args.lora_path}.")
+        #    logger.info(lora_state_dict.keys())
+        #    model.load_state_dict(lora_state_dict, strict=False)
+   
+        #trainable_params.append('lora')
+        #trainable_params.append('resweight')
 
-def find_pruneable_heads_and_indices(
-    heads: List[int], n_heads: int, head_size: int, already_pruned_heads: Set[int]
-) -> Tuple[Set[int], torch.LongTensor]:
-    """
-    Finds the heads and their indices taking `already_pruned_heads` into account.
-
-    Args:
-        heads (`List[int]`): List of the indices of heads to prune.
-        n_heads (`int`): The number of heads in the model.
-        head_size (`int`): The size of each head.
-        already_pruned_heads (`Set[int]`): A set of already pruned heads.
-
-    Returns:
-        `Tuple[Set[int], torch.LongTensor]`: A tuple with the indices of heads to prune taking `already_pruned_heads`
-        into account and the indices of rows/columns to keep in the layer weight.
-    """
-    mask = torch.ones(n_heads, head_size)
-    heads = set(heads) - already_pruned_heads  # Convert to set and remove already pruned heads
-    for head in heads:
-        # Compute how many pruned heads are before the head and move the index accordingly
-        head = head - sum(1 if h < head else 0 for h in already_pruned_heads)
-        mask[head] = 0
-    mask = mask.view(-1).contiguous().eq(1)
-    index: torch.LongTensor = torch.arange(len(mask))[mask].long()
-    return heads, index
-
-
-def meshgrid(
-    *tensors: Union[torch.Tensor, List[torch.Tensor]], indexing: Optional[str] = None
-) -> Tuple[torch.Tensor, ...]:
-    """
-    Wrapper around torch.meshgrid to avoid warning messages about the introduced `indexing` argument.
-
-    Reference: https://pytorch.org/docs/1.13/generated/torch.meshgrid.html
-    """
-    return torch.meshgrid(*tensors, indexing=indexing)
-
-
-def id_tensor_storage(tensor: torch.Tensor) -> Tuple[torch.device, int, int]:
-    """
-    Unique identifier to a tensor storage. Multiple different tensors can share the same underlying storage. For
-    example, "meta" tensors all share the same storage, and thus their identifier will all be equal. This identifier is
-    guaranteed to be unique and constant for this tensor's storage during its lifetime. Two tensor storages with
-    non-overlapping lifetimes may have the same id.
-    """
-    if tensor.device.type == "xla" and is_torch_xla_available():
-        # NOTE: xla tensors dont have storage
-        # use some other unique id to distinguish.
-        # this is a XLA tensor, it must be created using torch_xla's
-        # device. So the following import is safe:
-        import torch_xla
-
-        unique_id = torch_xla._XLAC._xla_get_tensor_id(tensor)
+    '''
+    num_param = 0
+    # if no trainable_params then perform full finetuning
+    print (trainable_params)
+    names = set()
+    for name, _ in model.named_parameters():
+        names.add(name)
+    if len(trainable_params) > 0 :
+        for name, param in model.named_parameters():
+            if name.startswith('deberta') or name.startswith('roberta') or name.startswith('bert'):
+                param.requires_grad = False
+                for trainable_param in trainable_params:
+                    if trainable_param in name and 'lora_mask' not in name:
+                        param.requires_grad = True
+                        sub_num_param = 1
+                        for dim in param.shape: 
+                            sub_num_param *= dim  
+                        num_param += sub_num_param 
+                        break
+            else:
+                param.requires_grad = True
     else:
-        unique_id = storage_ptr(tensor)
+        for name, param in model.named_parameters():
+            sub_num_param = 1
+            for dim in param.shape:
+                sub_num_param *= dim  
+            num_param += sub_num_param
+            param.requires_grad = True
+    '''
+    print (model)
+    
+    #logger.info("Number of Trainable Parameters: %d"%(int(num_param))) 
 
-    return tensor.device, unique_id, storage_size(tensor)
+    # Preprocessing the datasets
+    if data_args.task_name is not None:
+        sentence1_key, sentence2_key = task_to_keys[data_args.task_name]
+    else:
+        # Again, we try to have some nice defaults but don't hesitate to tweak to your use case.
+        non_label_column_names = [name for name in datasets["train"].column_names if name != "label"]
+        if "sentence1" in non_label_column_names and "sentence2" in non_label_column_names:
+            sentence1_key, sentence2_key = "sentence1", "sentence2"
+        else:
+            if len(non_label_column_names) >= 2:
+                sentence1_key, sentence2_key = non_label_column_names[:2]
+            else:
+                sentence1_key, sentence2_key = non_label_column_names[0], None
+
+    # Padding strategy
+    if data_args.pad_to_max_length:
+        padding = "max_length"
+    else:
+        # We will pad later, dynamically at batch creation, to the max sequence length in each batch
+        padding = False
+
+    # Some models have set the order of the labels to use, so let's make sure we do use it.
+    label_to_id = None
+    if (
+        model.config.label2id != PretrainedConfig(num_labels=num_labels).label2id
+        and data_args.task_name is not None
+        and not is_regression
+    ):
+        # Some have all caps in their config, some don't.
+        label_name_to_id = {k.lower(): v for k, v in model.config.label2id.items()}
+        if list(sorted(label_name_to_id.keys())) == list(sorted(label_list)):
+            label_to_id = {i: int(label_name_to_id[label_list[i]]) for i in range(num_labels)}
+        else:
+            logger.warn(
+                "Your model seems to have been trained with labels, but they don't match the dataset: ",
+                f"model labels: {list(sorted(label_name_to_id.keys()))}, dataset labels: {list(sorted(label_list))}."
+                "\nIgnoring the model labels as a result.",
+            )
+    elif data_args.task_name is None and not is_regression:
+        label_to_id = {v: i for i, v in enumerate(label_list)}
+
+    if data_args.max_seq_length > tokenizer.model_max_length:
+        logger.warn(
+            f"The max_seq_length passed ({data_args.max_seq_length}) is larger than the maximum length for the"
+            f"model ({tokenizer.model_max_length}). Using max_seq_length={tokenizer.model_max_length}."
+        )
+    max_seq_length = min(data_args.max_seq_length, tokenizer.model_max_length)
+
+    def preprocess_function(examples):
+        # Tokenize the texts
+        args = (
+            (examples[sentence1_key],) if sentence2_key is None else (examples[sentence1_key], examples[sentence2_key])
+        )
+        result = tokenizer(*args, padding=padding, max_length=max_seq_length, truncation=True)
+
+        # Map labels to IDs (not necessary for GLUE tasks)
+        if label_to_id is not None and "label" in examples:
+            result["label"] = [(label_to_id[l] if l != -1 else -1) for l in examples["label"]]
+        return result
+
+    if data_args.test_adv_glue:
+        adv_glue = load_dataset("json", data_files = "adv_dev.json")
+        features = adv_glue['train'][data_args.task_name][0][0].keys()
+        from collections import defaultdict
+        mep = defaultdict(lambda : [])
+        for item in adv_glue['train'][data_args.task_name][0]:
+            for f in features:
+                mep[f].append(item[f])
+
+        adv_dataset = Dataset.from_dict(mep)
+        datasets['adv_validation'] = adv_dataset
+        
+    datasets = datasets.map(preprocess_function, batched=True, load_from_cache_file=not data_args.overwrite_cache)
+    if training_args.do_train:
+        if "train" not in datasets:
+            raise ValueError("--do_train requires a train dataset")
+        train_dataset = datasets["train"]
+        if data_args.max_train_samples is not None:
+            train_dataset = train_dataset.select(range(data_args.max_train_samples))
+
+    if training_args.do_eval:
+        if "validation" not in datasets and "validation_matched" not in datasets:
+            raise ValueError("--do_eval requires a validation dataset")
+        eval_dataset = datasets["validation_matched" if data_args.task_name == "mnli" else "validation"]
+        if data_args.max_val_samples is not None:
+            eval_dataset = eval_dataset.select(range(data_args.max_val_samples))
+
+    if training_args.do_predict or data_args.task_name is not None or data_args.test_file is not None:
+        if "test" not in datasets and "test_matched" not in datasets:
+            raise ValueError("--do_predict requires a test dataset")
+        test_dataset = datasets["test_matched" if data_args.task_name == "mnli" else "test"]
+        if data_args.max_test_samples is not None:
+            test_dataset = test_dataset.select(range(data_args.max_test_samples))
+
+    # Log a few random samples from the training set:
+    if training_args.do_train:
+        for index in random.sample(range(len(train_dataset)), 3):
+            logger.info(f"Sample {index} of the training set: {train_dataset[index]}.")
+
+    # Get the metric function
+    if data_args.task_name is not None:
+        if data_args.task_name in ['mrpc','rte','stsb','qnli','mnli','qqp','sst2','wnli']:
+            metric = evaluate.load("glue", data_args.task_name)
+        elif data_args.task_name=="cola" and "roberta" in model_args.model_name_or_path:
+            metric = evaluate.load("glue","mrpc")
+        #elif data_args.task_name=="cola" and model_args.model_name_or_path!="roberta-base":
+        #    metric = evaluate.load("glue","cola")
+        elif data_args.task_name in['cb','wic','boolq','axg','axb','copa']:
+            metric=evaluate.load("super_glue",data_args.task_name)
+    # TODO: When datasets metrics include regular accuracy, make an else here and remove special branch from
+    # compute_metrics
+
+    def expected_caliberation_error(samples,true_labels, M=10):
+        bin_boundaries=torch.linspace(0,1,M+1)
+        bin_lowers=bin_boundaries[:-1]
+        bin_uppers=bin_boundaries[1:]
+        confidences,_=torch.max(samples,dim=1)
+        predicted_label=torch.argmax(samples,dim=1)
+        accuracies=torch.eq(predicted_label,true_labels)
+        ece=torch.zeros(1)
+        for bin_lower,bin_upper in zip(bin_lowers,bin_uppers):
+            in_bin=torch.logical_and(confidences>bin_lower,confidences<=bin_upper)
+            prob_in_bin=torch.mean(in_bin.float())
+            if prob_in_bin>0:
+                accuracy_in_bin=torch.mean(accuracies[in_bin].float())
+                avg_confidence_in_bin=torch.mean(confidences[in_bin])
+                ece+=torch.abs(avg_confidence_in_bin-accuracy_in_bin)*prob_in_bin
+        return ece[0]
+    
+    def negative_log_likelihood(samples, true_labels):
+        probs=samples[torch.arange(len(samples)),true_labels]
+        log_probs=torch.log(probs)
+        nll_sum=-torch.mean(log_probs)
+        return nll_sum.item()
+    # You can define your custom compute_metrics function. It takes an `EvalPrediction` object (a namedtuple with a
+    # predictions and label_ids field) and has to return a dictionary string to float.
+    def compute_metrics(p: EvalPrediction):
+        preds = p.predictions[0] if isinstance(p.predictions, tuple) else p.predictions
+        preds2=torch.from_numpy(preds)
+        if data_args.task_name!="stsb":    
+            sam=nn.functional.softmax(preds2,dim=1)
+            print(sam[:10])
+        preds = np.squeeze(preds) if is_regression else np.argmax(preds, axis=1)
+        if data_args.task_name is not None:
+            result = metric.compute(predictions=preds, references=p.label_ids)
+            if data_args.task_name!='stsb':
+                result["ece"]=expected_caliberation_error(sam,torch.from_numpy(p.label_ids),M=10)
+                result["nll"]=negative_log_likelihood(sam,torch.from_numpy(p.label_ids))
+            if len(result) > 1:
+                result["combined_score"] = np.mean(list(result.values())).item()
+            return result
+        elif is_regression:
+            return {"mse": ((preds - p.label_ids) ** 2).mean().item()}
+        else:
+            return {"accuracy": (preds == p.label_ids).astype(np.float32).mean().item()}
+
+    # Data collator will default to DataCollatorWithPadding, so we change it if we already did the padding.
+    if data_args.pad_to_max_length:
+        data_collator = default_data_collator
+    elif training_args.fp16:
+        data_collator = DataCollatorWithPadding(tokenizer, pad_to_multiple_of=8)
+    else:
+        data_collator = None
+
+    rankallocator = None
+
+    max_seq_length = data_args.max_seq_length
+    text = ""
+    inputs = tokenizer(text,
+                    add_special_tokens=True, 
+                    return_attention_mask=True,
+                    padding=True,
+                    truncation="longest_first",
+                    max_length=max_seq_length)
+
+    if len(inputs["input_ids"]) < max_seq_length:
+        apply_num = max_seq_length-len(inputs["input_ids"])
+        inputs["input_ids"].extend([0]*apply_num)
+        #inputs["token_type_ids"].extend([0]*apply_num)
+        inputs["attention_mask"].extend([0]*apply_num)
+    
+    inputs["input_ids"] = torch.tensor([inputs["input_ids"]])
+    #inputs["token_type_ids"] = torch.tensor([inputs["token_type_ids"]])
+    inputs["attention_mask"] = torch.tensor([inputs["attention_mask"]])
+
+    batch_size = 1
+    input_shape = (batch_size, 128)
+    #flops, macs, params = calculate_flops(model=model, 
+    #                                  input_shape = input_shape,
+    #                                  output_as_string=True,
+    #                                  output_precision=4,
+    #                                  transformer_tokenizer=tokenizer)
+    print ("Number of parameters", sum(p.numel() for p in model.parameters() if p.requires_grad))
+    #print("T5 FLOPs:%s   MACs:%s   Params:%s \n" %(flops, macs, params))
+
+    # Initialize our Trainer
+    # for _, p in model.named_parameters():
+    #     print(p.requires_grad)
+    
+    for module in list(dict(model.named_modules()).values()):
+        if type(module).__name__ == 'CooperativeLinear' or type(module).__name__ == 'CooperativeConv1D':
+            module.train_cooperative = True
+
+    posthoc_flag = model_args.posthoc_app
+
+    #print (model.roberta.encoder.layer[0].attention.self.query.weight)
+    print ("Posthoc flag", posthoc_flag)
+
+    if posthoc_flag == 1:
+        training_args.num_train_epochs = training_args.num_std_epochs #training_args.num_train_epochs//2
+        for module in list(dict(model.named_modules()).values()):
+            if type(module).__name__ == 'CooperativeLinear' or type(module).__name__ == 'CooperativeConv1D':
+                module.train_cooperative = False
+        
+            trainer = Trainer(
+	        model=model,
+	        args=training_args,
+	        train_dataset=train_dataset if training_args.do_train else None,
+	        eval_dataset=eval_dataset if training_args.do_eval else None,
+	        compute_metrics=compute_metrics,
+	        tokenizer=tokenizer,
+	        data_collator=data_collator,
+	        tb_writter=tb_writter,
+	    )
+	    # Training
+        if training_args.do_train:
+            checkpoint = None
+            if last_checkpoint is not None:
+                checkpoint = last_checkpoint
+            elif os.path.isdir(model_args.model_name_or_path):
+                # Check the config from that potential checkpoint has the right number of labels before using it as a
+                # checkpoint.
+                if AutoConfig.from_pretrained(model_args.model_name_or_path).num_labels == num_labels:
+                    checkpoint = model_args.model_name_or_path
+
+            train_result = trainer.train(resume_from_checkpoint=checkpoint)
+            metrics = train_result.metrics
+            max_train_samples = (
+                data_args.max_train_samples if data_args.max_train_samples is not None else len(train_dataset)
+            )
+            metrics["train_samples"] = min(max_train_samples, len(train_dataset))
+
+            trainer.save_model()  # Saves the tokenizer too for easy upload
+
+            trainer.log_metrics("train", metrics)
+            trainer.save_metrics("train", metrics)
+            trainer.save_state()
+
+    print("COOPERATIVE RUN")
+    training_args.num_train_epochs = training_args.num_coop_epochs #orig_num_epochs - training_args.num_train_epochs
+    print(training_args.num_train_epochs)
+    if posthoc_flag == 1:
+        training_args.learning_rate = training_args.learning_rate * 5
+    for module in list(dict(model.named_modules()).values()):
+        if type(module).__name__ == 'CooperativeLinear' or type(module).__name__ == 'CooperativeConv1D':
+            module.train_cooperative = True
+            # module.initialize_prior_fine() #un-comment to use cov initialization
+
+    if posthoc_flag == 1:
+        for n, p in model.named_parameters():
+            if "expert_weights_prior" not in n and "std_prior" not in n:
+                p.requires_grad = False
+
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        train_dataset=train_dataset if training_args.do_train else None,
+        eval_dataset=eval_dataset if training_args.do_eval else None,
+        compute_metrics=compute_metrics,
+        tokenizer=tokenizer,
+        data_collator=data_collator,
+        tb_writter=tb_writter,
+    )
+    # Training
+    if training_args.do_train:
+        checkpoint = None
+        if last_checkpoint is not None:
+            checkpoint = last_checkpoint
+        elif os.path.isdir(model_args.model_name_or_path):
+            # Check the config from that potential checkpoint has the right number of labels before using it as a
+            # checkpoint.
+            if AutoConfig.from_pretrained(model_args.model_name_or_path).num_labels == num_labels:
+                checkpoint = model_args.model_name_or_path
+
+        train_result = trainer.train(resume_from_checkpoint=checkpoint)
+        metrics = train_result.metrics
+        max_train_samples = (
+            data_args.max_train_samples if data_args.max_train_samples is not None else len(train_dataset)
+        )
+        metrics["train_samples"] = min(max_train_samples, len(train_dataset))
+
+        trainer.save_model()  # Saves the tokenizer too for easy upload
+
+        trainer.log_metrics("train", metrics)
+        trainer.save_metrics("train", metrics)
+        trainer.save_state()
+    
+    # Evaluation
+    if training_args.do_eval:
+        logger.info("*** Evaluate ***")
+
+        # Loop to handle MNLI double evaluation (matched, mis-matched)
+        tasks = [data_args.task_name]
+        eval_datasets = [eval_dataset]
+        if data_args.task_name == "mnli":
+            tasks.append("mnli-mm")
+            eval_datasets.append(datasets["validation_mismatched"])
+
+        for eval_dataset, task in zip(eval_datasets, tasks):
+            metrics = trainer.evaluate(eval_dataset=eval_dataset)
+
+            max_val_samples = data_args.max_val_samples if data_args.max_val_samples is not None else len(eval_dataset)
+            metrics["eval_samples"] = min(max_val_samples, len(eval_dataset))
+            for key in metrics:
+                if tb_writter:
+                    tb_writter.add_scalar("Eval_%s/%s"%(task, key), metrics[key], training_args.num_train_epochs)
+                logger.info("{task} {key}: {value}:".format(task=task, key=key, value=metrics[key]))
+
+            trainer.log_metrics("Eval_%s"%task, metrics)
+            trainer.save_metrics("Eval_%s"%task, metrics)
+
+    if data_args.test_adv_glue:
+        eval_datasets = [datasets['adv_validation']]
+
+        for eval_dataset, task in zip(eval_datasets, tasks):
+            metrics = trainer.evaluate(eval_dataset=eval_dataset)
+
+            max_val_samples = data_args.max_val_samples if data_args.max_val_samples is not None else len(eval_dataset)
+            metrics["eval_samples"] = min(max_val_samples, len(eval_dataset))
+            for key in metrics:
+                if tb_writter:
+                    tb_writter.add_scalar("Eval_%s/%s"%(task, key), metrics[key], training_args.num_train_epochs)
+                logger.info("{task} {key}: {value}:".format(task=task, key=key, value=metrics[key]))
+
+            trainer.log_metrics("Adversarial Eval_%s"%task, metrics)
+            trainer.save_metrics("Adversarial Eval_%s"%task, metrics)
+
+    if training_args.do_predict:
+        logger.info("*** Test ***")
+
+        # Loop to handle MNLI double evaluation (matched, mis-matched)
+        tasks = [data_args.task_name]
+        test_datasets = [test_dataset]
+        if data_args.task_name == "mnli":
+            tasks.append("mnli-mm")
+            test_datasets.append(datasets["test_mismatched"])
+
+        for test_dataset, task in zip(test_datasets, tasks):
+            # Removing the `label` columns because it contains -1 and Trainer won't like that.
+            test_dataset.remove_columns_("label")
+            predictions = trainer.predict(test_dataset=test_dataset).predictions
+            predictions = np.squeeze(predictions) if is_regression else np.argmax(predictions, axis=1)
+
+            output_test_file = os.path.join(training_args.output_dir, f"test_results_{task}.txt")
+            if trainer.is_world_process_zero():
+                with open(output_test_file, "w") as writer:
+                    logger.info(f"***** Test results {task} *****")
+                    writer.write("index\tprediction\n")
+                    for index, item in enumerate(predictions):
+                        if is_regression:
+                            writer.write(f"{index}\t{item:3.3f}\n")
+                        else:
+                            item = label_list[item]
+                            writer.write(f"{index}\t{item}\n")
+    if tb_writter is not None:
+        tb_writter.close() 
+
+
+def _mp_fn(index):
+    # For xla_spawn (TPUs)
+    main()
+
+
+if __name__ == "__main__":
+    print(os.getcwd())
+    main()
