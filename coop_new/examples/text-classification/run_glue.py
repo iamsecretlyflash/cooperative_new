@@ -30,8 +30,8 @@ from dataclasses import dataclass, field
 from typing import Optional
 import evaluate
 import numpy as np
-from copy import deepcopy as cp
 from datasets import load_dataset, load_metric
+from datasets import DatasetDict, Dataset
 import warnings
 warnings.filterwarnings("ignore")
 import transformers
@@ -80,21 +80,18 @@ task_to_keys = {
     "rte": ("sentence1", "sentence2"),
     "sst2": ("sentence", None),
     "stsb": ("sentence1", "sentence2"),
-    "wnli": ("sentence1", "sentence2"),#SuperGLUE tasks below
-    "wic": ("sentence1", "sentence2"),
-    "boolq": ("passage", "question"),
+    "wnli": ("sentence1", "sentence2"),
+    "wic": ("sentence1", "sentence2"),  #SuperGLUE tasks below
+    "boolq": ("passage", "question"),   
     "cb": ("premise","hypothesis"),
     "axg": ("premise","hypothesis"),
     "axb": ("sentence1","sentence2"),
-    "copa": ("premise","choice1","choice2","question"),#AdvGLUE tasks below
+    "copa": ("premise","choice1","choice2","question"), #AdvGLUE tasks below
     "adv_mnli": ("premise","hypothesis"),
     "adv_qnli": ("question","sentence"),
     "adv_qqp" : ("question1","question2"),
     "adv_rte" : ("sentence1","sentence2"),
     "adv_sst2" : ("sentence", None)
-
-
-
 }
 
 logger = logging.getLogger(__name__)
@@ -109,10 +106,6 @@ class DataTrainingArguments:
     into argparse arguments to be able to specify them on
     the command line.
     """
-    use_adv: Optional[bool] = field(
-        default=False,
-        metadata={"help": "Argument to decide whether to evaluate on advGLUE or not"},
-    )
 
     task_name: Optional[str] = field(
         default=None,
@@ -162,6 +155,9 @@ class DataTrainingArguments:
     validation_file: Optional[str] = field(
         default=None, metadata={"help": "A csv or a json file containing the validation data."}
     )
+    test_adv_glue: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to use adversarial GLUE test set or not."}
+    )
     test_file: Optional[str] = field(default=None, metadata={"help": "A csv or a json file containing the test data."})
 
     def __post_init__(self):
@@ -174,6 +170,7 @@ class DataTrainingArguments:
         else:
             train_extension = self.train_file.split(".")[-1]
             assert train_extension in ["csv", "json"], "`train_file` should be a csv or a json file."
+            print(self.validation_file)
             validation_extension = self.validation_file.split(".")[-1]
             assert (
                 validation_extension == train_extension
@@ -388,18 +385,10 @@ def main():
     if data_args.task_name in ['mrpc','rte','cola','stsb','qnli','mnli','qqp','sst2','wnli']:
         # Downloading and loading a dataset from the hub.
         datasets = load_dataset("glue", data_args.task_name)
-        if data_args.use_adv == True:
-            if data_args.task_name in ['rte','sst2','qnli','mnli','qqp']:
-                adv_dataset=load_dataset("AI-Secure/adv_glue","adv_"+data_args.task_name)
-                test_true_label=cp(adv_dataset["validation"]["label"][:])
-                adv_dataset=adv_dataset.map(lambda example: {"label":-1}, num_proc=None)
-                datasets["test"]=adv_dataset["validation"]
-            else:
-                raise ValueError("AdvGLUE only available for 'rte','sst2','qnli','mnli','qqp'")
     
     elif data_args.task_name in ['cb','wic','boolq','axg','axb','copa']:
         datasets = load_dataset("super_glue", data_args.task_name)
-        
+    
     else:
         # Loading a dataset from your local files.
         # CSV/JSON training and evaluation files are needed.
@@ -430,6 +419,8 @@ def main():
     # See more about loading any type of standard or custom dataset at
     # https://huggingface.co/docs/datasets/loading_datasets.html.
 
+    
+    print(datasets)
     # Labels
     if data_args.task_name is not None:
         is_regression = data_args.task_name == "stsb"
@@ -634,6 +625,18 @@ def main():
             result["label"] = [(label_to_id[l] if l != -1 else -1) for l in examples["label"]]
         return result
 
+    if data_args.test_adv_glue:
+        adv_glue = load_dataset("json", data_files = "adv_dev.json")
+        features = adv_glue['train'][data_args.task_name][0][0].keys()
+        from collections import defaultdict
+        mep = defaultdict(lambda : [])
+        for item in adv_glue['train'][data_args.task_name][0]:
+            for f in features:
+                mep[f].append(item[f])
+
+        adv_dataset = Dataset.from_dict(mep)
+        datasets['adv_validation'] = adv_dataset
+        
     datasets = datasets.map(preprocess_function, batched=True, load_from_cache_file=not data_args.overwrite_cache)
     if training_args.do_train:
         if "train" not in datasets:
@@ -665,7 +668,7 @@ def main():
     if data_args.task_name is not None:
         if data_args.task_name in ['mrpc','rte','stsb','qnli','mnli','qqp','sst2','wnli']:
             metric = evaluate.load("glue", data_args.task_name)
-        elif data_args.task_name=="cola" and model_args.model_name_or_path=="roberta-base":
+        elif data_args.task_name=="cola" and "roberta" in model_args.model_name_or_path:
             metric = evaluate.load("glue","mrpc")
         elif data_args.task_name=="cola" and model_args.model_name_or_path!="roberta-base":
             metric = evaluate.load("glue","cola")
@@ -754,83 +757,39 @@ def main():
     #                                  output_as_string=True,
     #                                  output_precision=4,
     #                                  transformer_tokenizer=tokenizer)
-    print ("Number of total parameters", sum(p.numel() for p in model.parameters()))
-    print ("Number of trainable parameters", sum(p.numel() for p in model.parameters() if p.requires_grad))
+    print ("Number of parameters", sum(p.numel() for p in model.parameters() if p.requires_grad))
     #print("T5 FLOPs:%s   MACs:%s   Params:%s \n" %(flops, macs, params))
 
     # Initialize our Trainer
     # for _, p in model.named_parameters():
     #     print(p.requires_grad)
     
+    for module in list(dict(model.named_modules()).values()):
+        if type(module).__name__ == 'CooperativeLinear' or type(module).__name__ == 'CooperativeConv1D':
+            module.train_cooperative = True
+
     posthoc_flag = model_args.posthoc_app
-    training_args.num_train_epochs = training_args.num_std_epochs #training_args.num_train_epochs//2
-    if model_args.expert_locations != '' and  training_args.num_train_epochs != training_args.num_coop_epochs:
+
+    #print (model.roberta.encoder.layer[0].attention.self.query.weight)
+    print ("Posthoc flag", posthoc_flag)
+
+    if posthoc_flag == 1:
+        training_args.num_train_epochs = training_args.num_std_epochs #training_args.num_train_epochs//2
         for module in list(dict(model.named_modules()).values()):
             if type(module).__name__ == 'CooperativeLinear' or type(module).__name__ == 'CooperativeConv1D':
                 module.train_cooperative = False
-    if training_args.num_std_epochs:
-        print("Standard Run")
-    trainer = Trainer(
-        model=model,
-        args=training_args,
-        train_dataset=train_dataset if training_args.do_train else None,
-        eval_dataset=eval_dataset if training_args.do_eval else None,
-        compute_metrics=compute_metrics,
-        tokenizer=tokenizer,
-        data_collator=data_collator,
-        tb_writter=tb_writter,
-    )
-    # Training
-    if training_args.do_train:
-        checkpoint = None
-        if last_checkpoint is not None:
-            checkpoint = last_checkpoint
-        elif os.path.isdir(model_args.model_name_or_path):
-            # Check the config from that potential checkpoint has the right number of labels before using it as a
-            # checkpoint.
-            if AutoConfig.from_pretrained(model_args.model_name_or_path).num_labels == num_labels:
-                checkpoint = model_args.model_name_or_path
-
-        train_result = trainer.train(resume_from_checkpoint=checkpoint)
-        metrics = train_result.metrics
-        max_train_samples = (
-            data_args.max_train_samples if data_args.max_train_samples is not None else len(train_dataset)
-        )
-        metrics["train_samples"] = min(max_train_samples, len(train_dataset))
-
-        trainer.save_model()  # Saves the tokenizer too for easy upload
-
-        trainer.log_metrics("train", metrics)
-        trainer.save_metrics("train", metrics)
-        trainer.save_state()
-
-    
-    if training_args.num_coop_epochs:
-        print("COOPERATIVE RUN")
-        training_args.num_train_epochs = training_args.num_coop_epochs
-        print(training_args.num_train_epochs)
-        for module in list(dict(model.named_modules()).values()):
-            if type(module).__name__ == 'CooperativeLinear' or type(module).__name__ == 'CooperativeConv1D':
-                module.train_cooperative = True
-                module.initialize_prior_fine()
-
-        if posthoc_flag :
-            training_args.learning_rate = training_args.learning_rate * 5
-            for n, p in model.named_parameters():
-                if "expert_weights_prior" not in n and "std_prior" not in n:
-                    p.requires_grad = False
-
-        trainer = Trainer(
-            model=model,
-            args=training_args,
-            train_dataset=train_dataset if training_args.do_train else None,
-            eval_dataset=eval_dataset if training_args.do_eval else None,
-            compute_metrics=compute_metrics,
-            tokenizer=tokenizer,
-            data_collator=data_collator,
-            tb_writter=tb_writter,
-        )
-        # Training
+        
+            trainer = Trainer(
+	        model=model,
+	        args=training_args,
+	        train_dataset=train_dataset if training_args.do_train else None,
+	        eval_dataset=eval_dataset if training_args.do_eval else None,
+	        compute_metrics=compute_metrics,
+	        tokenizer=tokenizer,
+	        data_collator=data_collator,
+	        tb_writter=tb_writter,
+	    )
+	    # Training
         if training_args.do_train:
             checkpoint = None
             if last_checkpoint is not None:
@@ -854,14 +813,20 @@ def main():
             trainer.save_metrics("train", metrics)
             trainer.save_state()
 
-    '''
-    for name, p in model.named_parameters():
-        if 'prior' in name:
-            p.requires_grad = False
-
+    print("COOPERATIVE RUN")
+    training_args.num_train_epochs = training_args.num_coop_epochs #orig_num_epochs - training_args.num_train_epochs
+    print(training_args.num_train_epochs)
+    if posthoc_flag == 1:
+        training_args.learning_rate = training_args.learning_rate * 5
     for module in list(dict(model.named_modules()).values()):
-            if type(module).__name__ == 'CooperativeLinear' or type(module).__name__ == 'CooperativeConv1D':
-                module.train_cooperative = False
+        if type(module).__name__ == 'CooperativeLinear' or type(module).__name__ == 'CooperativeConv1D':
+            module.train_cooperative = True
+            # module.initialize_prior_fine() #un-comment to use cov initialization
+
+    if posthoc_flag == 1:
+        for n, p in model.named_parameters():
+            if "expert_weights_prior" not in n and "std_prior" not in n:
+                p.requires_grad = False
 
     trainer = Trainer(
         model=model,
@@ -896,55 +861,6 @@ def main():
         trainer.log_metrics("train", metrics)
         trainer.save_metrics("train", metrics)
         trainer.save_state()
-
-    # Cooperative run
-
-    for name, p in model.named_parameters():
-        if 'prior' in name:
-            p.requires_grad = True
-        else:
-            p.requires_grad = False
-
-    for module in list(dict(model.named_modules()).values()):
-            if type(module).__name__ == 'CooperativeLinear' or type(module).__name__ == 'CooperativeConv1D':
-                module.train_cooperative = True
-
-    training_args.learning_rate *= 10
-
-    trainer = Trainer(
-        model=model,
-        args=training_args,
-        train_dataset=train_dataset if training_args.do_train else None,
-        eval_dataset=eval_dataset if training_args.do_eval else None,
-        compute_metrics=compute_metrics,
-        tokenizer=tokenizer,
-        data_collator=data_collator,
-        tb_writter=tb_writter,
-    )
-    # Training
-    if training_args.do_train:
-        checkpoint = None
-        if last_checkpoint is not None:
-            checkpoint = last_checkpoint
-        elif os.path.isdir(model_args.model_name_or_path):
-            # Check the config from that potential checkpoint has the right number of labels before using it as a
-            # checkpoint.
-            if AutoConfig.from_pretrained(model_args.model_name_or_path).num_labels == num_labels:
-                checkpoint = model_args.model_name_or_path
-
-        train_result = trainer.train(resume_from_checkpoint=checkpoint)
-        metrics = train_result.metrics
-        max_train_samples = (
-            data_args.max_train_samples if data_args.max_train_samples is not None else len(train_dataset)
-        )
-        metrics["train_samples"] = min(max_train_samples, len(train_dataset))
-
-        trainer.save_model()  # Saves the tokenizer too for easy upload
-
-        trainer.log_metrics("train", metrics)
-        trainer.save_metrics("train", metrics)
-        trainer.save_state()
-    '''
     
     # Evaluation
     if training_args.do_eval:
@@ -970,6 +886,22 @@ def main():
             trainer.log_metrics("Eval_%s"%task, metrics)
             trainer.save_metrics("Eval_%s"%task, metrics)
 
+    if data_args.test_adv_glue:
+        eval_datasets = [datasets['adv_validation']]
+
+        for eval_dataset, task in zip(eval_datasets, tasks):
+            metrics = trainer.evaluate(eval_dataset=eval_dataset)
+
+            max_val_samples = data_args.max_val_samples if data_args.max_val_samples is not None else len(eval_dataset)
+            metrics["eval_samples"] = min(max_val_samples, len(eval_dataset))
+            for key in metrics:
+                if tb_writter:
+                    tb_writter.add_scalar("Eval_%s/%s"%(task, key), metrics[key], training_args.num_train_epochs)
+                logger.info("{task} {key}: {value}:".format(task=task, key=key, value=metrics[key]))
+
+            trainer.log_metrics("Adversarial Eval_%s"%task, metrics)
+            trainer.save_metrics("Adversarial Eval_%s"%task, metrics)
+
     if training_args.do_predict:
         logger.info("*** Test ***")
 
@@ -982,7 +914,7 @@ def main():
 
         for test_dataset, task in zip(test_datasets, tasks):
             # Removing the `label` columns because it contains -1 and Trainer won't like that.
-            test_dataset.remove_columns("label")
+            test_dataset.remove_columns_("label")
             predictions = trainer.predict(test_dataset=test_dataset).predictions
             predictions = np.squeeze(predictions) if is_regression else np.argmax(predictions, axis=1)
 
@@ -1009,4 +941,3 @@ def _mp_fn(index):
 if __name__ == "__main__":
     print(os.getcwd())
     main()
-

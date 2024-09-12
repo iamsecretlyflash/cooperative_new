@@ -2129,7 +2129,7 @@ class Trainer:
             #    for v in reversed(list(dict(model.named_modules()).values())):
             #       if type(v).__name__ == 'CooperativeLinear' or type(v).__name__ == 'CooperativeConv1D':
             #           v.train_cooperative = True
-            #           v.initialize_prior_fine()
+            #           #v.initialize_prior_fine()
             #           v.weight.requires_grad = False
             #           try:
             #               v.bias.requires_grad = False
@@ -2178,6 +2178,13 @@ class Trainer:
             for step, inputs in enumerate(epoch_iterator):
                 total_batched_samples += 1
 
+                #try:
+                #    if step%20 == 1:
+                #        print (self.model.roberta.encoder.layer[0].attention.self.query.std_prior)
+                #        print (self.model.roberta.encoder.layer[0].attention.self.query.expert_weights)
+                #except:
+                #    pass
+
                 if self.args.include_num_input_tokens_seen:
                     main_input_name = getattr(self.model, "main_input_name", "input_ids")
                     if main_input_name not in inputs:
@@ -2216,15 +2223,25 @@ class Trainer:
                     tr_loss_step = self.training_step(model, inputs)
                     var_loss = 0
                     var_loss_times = 0
+                    l1s = 0
+                    l2s = 0
                     for module in list(dict(model.named_modules()).values()):
                         if type(module).__name__ == 'CooperativeLinear' or type(module).__name__ == 'CooperativeConv1D':
                             try:
-                                var_loss += module.get_variational_loss().detach()
+                                l1, l2 = module.get_variational_loss()
+                                l1 = l1.detach()
+                                l2 = l2.detach()
+                                l1s += l1
+                                l2s += l2
+                                var_loss += l1 + l2
                             except:
                                 pass
                             var_loss_times+=1
                             
                     tr_orig_loss = tr_loss_step - (var_loss / max(1,var_loss_times))/self.args.gradient_accumulation_steps
+
+                if step%20 == 1:
+                    print ("KLD loss", l1s, "Entropy loss", l2s)
 
                 if (
                     args.logging_nan_inf_filter
@@ -3183,7 +3200,9 @@ class Trainer:
         var_loss_times = 0
         for module in list(dict(model.named_modules()).values()):
             if type(module).__name__ == 'CooperativeLinear' or type(module).__name__ == 'CooperativeConv1D':
-                var_loss += module.get_variational_loss()
+                #var_loss += module.get_variational_loss()
+                l1, l2 = module.get_variational_loss()
+                var_loss += l1 + l2
                 var_loss_times+=1
 
         loss += var_loss / max(1,var_loss_times)

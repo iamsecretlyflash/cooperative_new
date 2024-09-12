@@ -93,15 +93,15 @@ def prune_linear_layer(layer: nn.Linear, index: torch.LongTensor, dim: int = 0) 
 
 class CooperativeLinear(nn.Linear):
     def __init__(
-        self,
-        in_features: int,
-        out_features: int,
+        self, 
+        in_features: int, 
+        out_features: int, 
         num_experts: int,
-        fan_in_fan_out : bool = False,
+        fan_in_fan_out : bool = False, 
         use_entropy = True,
         sample_period = 1,
         dirichlet_prior = 1,
-        var_loss_scale = 1e-3,
+        var_loss_scale = 1e-2,
         use_averaging = True,
         averaging_factor = 0.9,
         kl_loss_weight = 1e-5,
@@ -110,7 +110,7 @@ class CooperativeLinear(nn.Linear):
         **kwargs
     ):
         nn.Linear.__init__(self, in_features, out_features, **kwargs)
-
+        
         self.num_experts = num_experts
         self.in_features = in_features
         self.out_features = out_features
@@ -127,74 +127,53 @@ class CooperativeLinear(nn.Linear):
         self.wishert_prior = torch.eye(out_features)
         self.dirichlet_prior = dirichlet_prior
         self.var_loss_scale = var_loss_scale
-
-        self.expert_weights_prior = nn.Parameter(-dirichlet_prior + 2*dirichlet_prior * torch.rand(num_experts))
+        
+        #self.expert_weights_prior = nn.Parameter(-dirichlet_prior + 2*dirichlet_prior * torch.rand(num_experts))
+        
+        self.expert_weights_prior = nn.Parameter(torch.rand(num_experts))
 
         self.std_prior = nn.Parameter(torch.rand(out_features))
-        self.prior_initialised = False
 
-        nn.init.uniform_(self.expert_weights_prior)
-        nn.init.uniform_(self.std_prior)
-
+        #nn.init.uniform_(self.expert_weights_prior)
+        try:
+            nn.init.xavier_normal_(self.std_prior)
+        except:
+            pass
         self.averaging_factor = averaging_factor
         self.sample_counter = 0
         self.forward_counter = 0
 
-
-    def initialize_prior_fine(self):
-        
-        # self.std_prior = nn.Parameter(self.weight.cov())
-        if not self.prior_initialised:
-            self.std_prior = nn.Parameter(((self.weight.cov()).diag()).sqrt()).to(self.device)
-            self.prior_initialised = True
-
     def gamma(self, v):
         return torch.lgamma(v).exp()
-
-    def multivariate_reparameterization(self, var2):
+        
+    def multivariate_reparameterization(self, mu, var2):
         # https://www.wikiwand.com/en/Multivariate_normal_distribution#Drawing_values_from_the_distribution
         sampler = MultivariateNormal(loc=torch.zeros(self.out_features).to(self.device), \
                                      covariance_matrix=torch.eye(self.out_features).to(self.device))
         all_vars = sampler.sample((self.num_experts, self.in_features)).to(self.device)
-        #print (var2, var2.dtype)
-        #print (var2.to(torch.float32))
         L = torch.linalg.cholesky(var2).to(var2.dtype)
-        #L = torch.linalg.cholesky(var2)
-        #print (self.var_loss_scale * torch.einsum('eio,op->eip', all_vars, L))
         varsum = torch.einsum('eio,op->eip', all_vars, L)
-        #print ("Varsum")
-        #print (varsum
-        # updated_mu = varsum + mu
-        return self.var_loss_scale * varsum 
-
+        return self.var_loss_scale * varsum
+        
     def multivariate_kl(self, var):
         # https://statproofbook.github.io/P/mvn-kl.html
         # log-sum inequality - https://mat.hjg.com.ar/tic/img/lecture3.pdf
-        #var = std @ std.T
-        #return self.num_experts * self.in_features * 0.5 * (var.trace() - torch.log(var.det()) - self.out_features)
         return self.num_experts * 0.5 * (var.trace() - torch.log(var).trace() - self.out_features)
-
+        
     def wishart_reparameterization(self, std):
-        #dtype = std.dtype
-        #std = std.float()
-        #max_try_correction = 3 if torch._C._get_tracing_state() else 10
-
         # http://sfb649.wiwi.hu-berlin.de/fedc_homepage/xplore/tutorials/mvahtmlnode40.html
         sampler = Wishart(df=self.wishart_df, scale_tril=torch.eye(self.out_features).to(self.device))
-        #sampler.arg_constraints['scale_tril'] = constraints.greater_than(0)
-        #sampler.support = constraints.lower_cholesky
-        #print (sampler)
-        sample = sampler.float32_rsample(torch.Size()).to(torch.float32)
+
+        sample = sampler._bartlett_sampling(torch.Size()).to(torch.float32)
+
         updated_var =  std @ sample.to(self.device) @ std.T
         updated_var = torch.diag(torch.clip(updated_var.diag(),min=eps)).to(updated_var.device).to(torch.float32)
-        return updated_var
 
+        return updated_var
+        
     def wishart_kl(self, std):
-        #var = self.var_loss_scale**2 * (std @ std.T)
         var = (std @ std.T)
         var = torch.diag(var.diag()).to(var.device)
-        #print (var)
-        #return 0.5 * (-torch.log(var.det())*self.wishart_df + var.trace()*self.wishart_df - self.wishart_df**2)
         return 0.5 * (-torch.log(var).trace()*self.wishart_df + var.trace()*self.wishart_df - self.wishart_df**2)
 
     def dirichlet_reparameterization(self, alpha2):
@@ -205,7 +184,7 @@ class CooperativeLinear(nn.Linear):
         mu = torch.log(alpha2) - 1/self.num_experts * torch.log(alpha2).sum()
         sigma = torch.diag(1/alpha2 * (1 - 2/self.num_experts) + 1/(self.num_experts ** 2) * (1/alpha2).sum())
         return torch.linalg.cholesky(sigma) @ sample + mu
-
+        
     def dirichlet_kl(self, alpha2):
         # https://statproofbook.github.io/P/dir-kl.html
         alpha1 = torch.tensor([self.dirichlet_prior]*self.num_experts).to(self.device)
@@ -222,40 +201,78 @@ class CooperativeLinear(nn.Linear):
             kl2 = self.wishart_kl(torch.diag(self.std_prior))
             #kl2 = self.wishart_kl(self.std_prior)
             kl3 = self.multivariate_kl(self.gaussian_var_prior)
-
+            
             if self.use_entropy == True:
                 loss4 = self.calculate_entropy(self.expert_weights)
-                return self.kl_loss_weight*(kl1 + kl2 + kl3) + loss4
+                return self.kl_loss_weight*(kl1 + kl2 + kl3), loss4
                 #return loss4
             else:
-                return self.kl_loss_weight * (kl1 + kl2 + kl3)
+                return self.kl_loss_weight * (kl1 + kl2 + kl3), torch.tensor(0)
                 #return 0
         else:
-            return 0
-
+            return 0, 0
+        
     def calculate_entropy(self, expert_weights):
-        return (expert_weights * expert_weights.log()).sum()/len(expert_weights)
+        #return (expert_weights * expert_weights.log()).sum()
+        return (expert_weights ** 2).sum()
 
-    def forward(self, x):
-        if self.training == True and self.train_cooperative == True:
-            #print ("Forward count", self.forward_counter)
-            gaussian_var_prior = self.wishart_reparameterization(torch.diag(self.std_prior))
-            self.gaussian_var_prior = gaussian_var_prior
-            varvar = self.multivariate_reparameterization( gaussian_var_prior)
-            updated_mu = self.weight.data.T + varvar
+    def forward(self, x):       
+        mu = cp(self.weight.data)
+        if self.fan_in_fan_out == False:
+            mu = mu.T
 
-            updated_mu = torch.nan_to_num(updated_mu, nan=0.0)
+        if self.training == True:            
+            if self.train_cooperative == True:  
+                gaussian_var_prior = self.wishart_reparameterization(torch.diag(self.std_prior)) #*self.var_loss_scale
+                self.gaussian_var_prior = gaussian_var_prior
 
-            expert_weights = self.dirichlet_reparameterization(nn.Sigmoid()(self.expert_weights_prior))
-            expert_weights = nn.Sigmoid()(expert_weights)
-            expert_weights = expert_weights/expert_weights.sum()
+                var = self.multivariate_reparameterization(mu, gaussian_var_prior)
+                self.var = self.var_loss_scale * var
+                updated_mu = self.var_loss_scale * var + mu
 
-            updated_mu = torch.nan_to_num(torch.einsum('i,ijk->jk', expert_weights, updated_mu), nan = 0)
-            self.expert_weights = expert_weights
-            self.weight.data = updated_mu.T
+                updated_mu = torch.nan_to_num(updated_mu, nan=0.0)
 
-        return F.linear(x, self.weight, self.bias)
+                #expert_weights = self.dirichlet_reparameterization(nn.Sigmoid()(self.expert_weights_prior))
 
+                expert_weights = self.dirichlet_reparameterization(self.expert_weights_prior)
+                expert_weights = nn.Sigmoid()(expert_weights)
+                expert_weights = expert_weights/expert_weights.sum()
+
+                updated_mu = torch.einsum('i,ijk->jk', expert_weights, updated_mu)
+                updated_mu = torch.nan_to_num(updated_mu, nan=0.0)
+                self.expert_weights = expert_weights
+
+                #print (x.device, self.updated_mu.device)                     
+                if self.fan_in_fan_out == False:
+                    #print (F.linear(x, mu.T, self.bias))
+                    res = F.linear(x, updated_mu.T, self.bias) 
+                else:
+                    #print (F.linear(x, mu.T, self.bias))
+                    res = F.linear(x, updated_mu, self.bias)
+                
+                #print (updated_mu.shape, self.weight.data.shape)
+
+                if self.fan_in_fan_out == False:
+                    self.weight.data.copy_(updated_mu.T)
+                else:
+                    self.weight.data.copy_(updated_mu)
+            else:
+                if self.fan_in_fan_out == False:
+                    res = F.linear(x, mu.T, self.bias)
+                else:
+                    res = F.linear(x, mu, self.bias)
+
+            self.forward_counter += 1
+            
+            return res
+        else:
+            if self.fan_in_fan_out == False:
+                res = F.linear(x, mu.T, self.bias)
+            else:
+                res = F.linear(x, mu, self.bias)
+
+            return res
+        
     def eval(self):
         self.training = False
 
