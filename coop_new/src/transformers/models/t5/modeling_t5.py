@@ -361,11 +361,11 @@ class T5DenseActDense(nn.Module):
     def __init__(self, config: T5Config):
         super().__init__()
         if 'intermediate' in config.expert_locations:
-            self.wi = CooperativeLinear(config.d_model, config.d_ff, config.num_experts, bias=False, log_variance_init=config.log_variance_init, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy)
+            self.wi = CooperativeLinear(config.d_model, config.d_ff, config.num_experts, bias=False, kl_loss_weight=config.kl_loss_weight, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy,use_averaging=config.use_averaging,sample_period=config.sample_period,train_cooperative=config.train_cooperative)
         else:
             self.wi = nn.Linear(config.d_model, config.d_ff, bias=False)
         if 'output' in config.expert_locations:
-            self.wo = CooperativeLinear(config.d_ff, config.d_model, config.num_experts, bias=False, log_variance_init=config.log_variance_init, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy)
+            self.wo = CooperativeLinear(config.d_ff, config.d_model, config.num_experts, bias=False, kl_loss_weight=config.kl_loss_weight, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy,use_averaging=config.use_averaging,sample_period=config.sample_period,train_cooperative=config.train_cooperative)
         else:
             self.wo = nn.Linear(config.d_ff, config.d_model, bias=False)
         self.dropout = nn.Dropout(config.dropout_rate)
@@ -389,15 +389,15 @@ class T5DenseGatedActDense(nn.Module):
     def __init__(self, config: T5Config):
         super().__init__()
         if 'intermediate' in config.expert_locations:
-            self.wi_0 = CooperativeLinear(config.d_model, config.d_ff, config.num_experts, bias=False, log_variance_init=config.log_variance_init, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy)
+            self.wi_0 = CooperativeLinear(config.d_model, config.d_ff, config.num_experts, bias=False, kl_loss_weight=config.kl_loss_weight, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy,use_averaging=config.use_averaging,sample_period=config.sample_period,train_cooperative=config.train_cooperative)
         else:
             self.wi_0 = nn.Linear(config.d_model, config.d_ff, bias=False)
         if 'intermediate' in config.expert_locations:
-            self.wi_1 = CooperativeLinear(config.d_model, config.d_ff, config.num_experts, bias=False, log_variance_init=config.log_variance_init, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy)
+            self.wi_1 = CooperativeLinear(config.d_model, config.d_ff, config.num_experts, bias=False, kl_loss_weight=config.kl_loss_weight, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy,use_averaging=config.use_averaging,sample_period=config.sample_period,train_cooperative=config.train_cooperative)
         else:
             self.wi_1 = nn.Linear(config.d_model, config.d_ff, bias=False)
         if 'output' in config.expert_locations:
-            self.wo = CooperativeLinear(config.d_ff, config.d_model, config.num_experts, bias=False, log_variance_init=config.log_variance_init, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy)
+            self.wo = CooperativeLinear(config.d_ff, config.d_model, config.num_experts, bias=False, kl_loss_weight=config.kl_loss_weight, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy,use_averaging=config.use_averaging,sample_period=config.sample_period,train_cooperative=config.train_cooperative)
         else:
             self.wo = nn.Linear(config.d_ff, config.d_model, bias=False)
         self.dropout = nn.Dropout(config.dropout_rate)
@@ -456,19 +456,19 @@ class T5Attention(nn.Module):
 
         # Mesh TensorFlow initialization to avoid scaling before softmax
         if 'query' in config.expert_locations:  
-            self.q = CooperativeLinear(self.d_model, self.inner_dim, config.num_experts, bias=False, log_variance_init=config.log_variance_init, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy)
+            self.q = CooperativeLinear(self.d_model, self.inner_dim, config.num_experts, bias=False, kl_loss_weight=config.kl_loss_weight, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy,use_averaging=config.use_averaging,sample_period=config.sample_period,train_cooperative=config.train_cooperative)
         else:
             self.q = nn.Linear(self.d_model, self.inner_dim, bias=False)
         if 'key' in config.expert_locations:  
-            self.k = CooperativeLinear(self.d_model, self.inner_dim, config.num_experts, bias=False, log_variance_init=config.log_variance_init, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy)
+            self.k = CooperativeLinear(self.d_model, self.inner_dim, config.num_experts, bias=False, kl_loss_weight=config.kl_loss_weight, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy,use_averaging=config.use_averaging,sample_period=config.sample_period,train_cooperative=config.train_cooperative)
         else:
             self.k = nn.Linear(self.d_model, self.inner_dim, bias=False)
         if 'value' in config.expert_locations:  
-            self.v = CooperativeLinear(self.d_model, self.inner_dim, config.num_experts, bias=False, log_variance_init=config.log_variance_init, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy)
+            self.v = CooperativeLinear(self.d_model, self.inner_dim, config.num_experts,  bias=False, kl_loss_weight=config.kl_loss_weight, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy,use_averaging=config.use_averaging,sample_period=config.sample_period,train_cooperative=config.train_cooperative)
         else:
             self.v = nn.Linear(self.d_model, self.inner_dim, bias=False)
         if 'attention_out' in config.expert_locations:  
-            self.o = CooperativeLinear(self.inner_dim, self.d_model, config.num_experts, bias=False, log_variance_init=config.log_variance_init, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy)
+            self.o = CooperativeLinear(self.inner_dim, self.d_model, config.num_experts,  bias=False, kl_loss_weight=config.kl_loss_weight, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy,use_averaging=config.use_averaging,sample_period=config.sample_period,train_cooperative=config.train_cooperative)
         else:
             self.o = nn.Linear(self.inner_dim, self.d_model, bias=False)
 
