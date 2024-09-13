@@ -325,17 +325,17 @@ class BertSelfAttention(nn.Module):
         self.all_head_size = self.num_attention_heads * self.attention_head_size
 
         if 'query' in config.expert_locations:  
-            self.query = CooperativeLinear(config.hidden_size, self.all_head_size, config.num_experts, log_variance_init=config.log_variance_init, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy)
+            self.query = CooperativeLinear(config.hidden_size, self.all_head_size, config.num_experts, kl_loss_weight=config.kl_loss_weight, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy,use_averaging=config.use_averaging,sample_period=config.sample_period,train_cooperative=config.train_cooperative)
         else :
             self.query = nn.Linear(config.hidden_size, self.all_head_size)
 
         if 'key' in config.expert_locations:  
-            self.key = CooperativeLinear(config.hidden_size, self.all_head_size, config.num_experts, log_variance_init=config.log_variance_init, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy)
+            self.key = CooperativeLinear(config.hidden_size, self.all_head_size, config.num_experts, kl_loss_weight=config.kl_loss_weight, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy,use_averaging=config.use_averaging,sample_period=config.sample_period,train_cooperative=config.train_cooperative)
         else :
             self.key = nn.Linear(config.hidden_size, self.all_head_size)
 
         if 'value' in config.expert_locations:  
-            self.value = CooperativeLinear(config.hidden_size, self.all_head_size, config.num_experts, log_variance_init=config.log_variance_init, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy)
+            self.value = CooperativeLinear(config.hidden_size, self.all_head_size, config.num_experts, kl_loss_weight=config.kl_loss_weight, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy,use_averaging=config.use_averaging,sample_period=config.sample_period,train_cooperative=config.train_cooperative)
         else :
             self.value = nn.Linear(config.hidden_size, self.all_head_size)
 
@@ -460,7 +460,7 @@ class BertSelfOutput(nn.Module):
     def __init__(self, config):
         super().__init__()
         if 'attention_out' in config.expert_locations:
-            self.dense = CooperativeLinear(config.hidden_size, config.hidden_size, config.num_experts, log_variance_init=config.log_variance_init, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy)
+            self.dense = CooperativeLinear(config.hidden_size, config.hidden_size, config.num_experts, kl_loss_weight=config.kl_loss_weight, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy,use_averaging=config.use_averaging,sample_period=config.sample_period,train_cooperative=config.train_cooperative)
         else:    
             self.dense = nn.Linear(config.hidden_size, config.hidden_size)
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
@@ -526,7 +526,7 @@ class BertIntermediate(nn.Module):
     def __init__(self, config):
         super().__init__()
         if 'intermediate' in config.expert_locations:
-            self.dense = CooperativeLinear(config.hidden_size, config.intermediate_size, config.num_experts, log_variance_init=config.log_variance_init, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy)
+            self.dense = CooperativeLinear(config.hidden_size, config.intermediate_size, config.num_experts, kl_loss_weight=config.kl_loss_weight, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy,use_averaging=config.use_averaging,sample_period=config.sample_period,train_cooperative=config.train_cooperative)
         else:    
             self.dense = nn.Linear(config.hidden_size, config.intermediate_size)
         if isinstance(config.hidden_act, str):
@@ -544,7 +544,7 @@ class BertOutput(nn.Module):
     def __init__(self, config):
         super().__init__()
         if 'output' in config.expert_locations:
-            self.dense = CooperativeLinear(config.intermediate_size, config.hidden_size, config.num_experts, log_variance_init=config.log_variance_init, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy)
+            self.dense = CooperativeLinear(config.intermediate_size, config.hidden_size, config.num_experts, kl_loss_weight=config.kl_loss_weight, var_loss_scale=config.var_loss_scale, use_entropy=config.use_entropy,use_averaging=config.use_averaging,sample_period=config.sample_period,train_cooperative=config.train_cooperative)
         else:
             self.dense = nn.Linear(config.intermediate_size, config.hidden_size)
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)

@@ -163,15 +163,13 @@ class BertConfig(PretrainedConfig):
         classifier_dropout=None,
         expert_locations = "query,key,value,attention_out,intermediate,output", #
         num_experts = 4, #4
-        log_variance_init = -10,
-        single_variance = False,
-        var_loss_scale = 1e-6,
+        var_loss_scale = 1e-2,
         use_entropy = False,
-        freeze_base = True,
-        weight_normalization = 'Softmax',
-        expert_weight_init = -1,
-        inference_mixing_coeff = 1,
         sample_period = 1,
+        use_averaging = True,
+        averaging_factor = 0.9,
+        kl_loss_weight = 1,
+        train_cooperative = True,
         **kwargs,
     ):
         super().__init__(pad_token_id=pad_token_id, **kwargs)
@@ -193,16 +191,13 @@ class BertConfig(PretrainedConfig):
         self.classifier_dropout = classifier_dropout
         self.expert_locations = expert_locations
         self.num_experts = num_experts
-        self.log_variance_init = log_variance_init
-        self.single_variance = single_variance
         self.var_loss_scale = var_loss_scale
         self.use_entropy = use_entropy
-        self.freeze_base = freeze_base
-        self.weight_normalization = weight_normalization 
-        self.expert_weight_init = expert_weight_init
-        self.inference_mixing_coeff = inference_mixing_coeff
+        self.use_averaging = use_averaging
         self.sample_period = sample_period 
-
+        self.averaging_factor = averaging_factor
+        self.kl_loss_weight = kl_loss_weight
+        self.train_cooperative = train_cooperative
 class BertOnnxConfig(OnnxConfig):
     @property
     def inputs(self) -> Mapping[str, Mapping[int, str]]:
