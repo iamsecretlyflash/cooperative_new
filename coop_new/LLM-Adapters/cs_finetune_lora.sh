@@ -1,18 +1,23 @@
 CUDA_VISIBLE_DEVICES=1 python finetune.py \
   --base_model '/home/models/llama-7b-hf' \
   --data_path 'ft-training_set/commonsense_170k.json' \
-  --output_dir './final_trained_models/cs/llama/lora_A/3e-4' \
+  --output_dir './final_trained_models/cs/llama/lora_A/9e-4' \
   --batch_size 16 \
+  --var_loss_scale 5e-3 \
+  --kl_loss_weight 1e-5 \
+  --use_entropy True \
   --micro_batch_size 16 \
-  --num_epochs 3 \
-  --num_epochs_coop 0 \
+  --num_epochs 5 \
+  --num_epochs_coop 5 \
   --lora_r 32 \
-  --learning_rate 3e-4 \
+  --learning_rate 9e-4 \
+  --learning_rate_coop 9e-4 \
   --cutoff_len 256 \
-  --val_set_size 120 \
+  --val_set_size 0 \
   --adapter_name lora \
-  --eval_step 10644 \
-  --save_step 10644 \
+  --eval_step 10652 \
+  --save_step 10652 \
   --lora_alpha 64 \
+  --posthoc_app 0 \
   --target_modules '[q_proj,k_proj,v_proj,gate_proj,up_proj,down_proj]' \
   --expert_locations 'lora_A' \
