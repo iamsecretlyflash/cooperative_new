@@ -31,7 +31,7 @@ def train(
         data_path: str = "yahma/alpaca-cleaned",
         output_dir: str = "./lora-alpaca",
         adapter_name: str = "lora",
-        lora_cooperative_at: str = "",
+        lora_cooperative_at: str = " ",
         cooperative_targets: List[str] = [],
         sample_period: int = 1,
         var_loss_scale: float = 5e-3,
