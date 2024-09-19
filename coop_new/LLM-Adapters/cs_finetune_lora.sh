@@ -50,8 +50,8 @@
   --target_modules '["q_proj", "k_proj", "v_proj", "up_proj", "down_proj"]' \
   --lora_cooperative_at 'lora_A' \
   --cooperative_targets '["q_proj", "k_proj", "v_proj"]' \
-  # --wandb_project 'llama-coop-test' \
-  # --wandb_run_name 'cs/llama/qkv/lora_A/1e-4' \
+  --wandb_project 'llama-coop-test' \
+  --wandb_run_name 'cs/llama/qkv/lora_A/1e-4' \
 
 
 CUDA_VISIBLE_DEVICES=0 python commonsense_evaluate.py \
