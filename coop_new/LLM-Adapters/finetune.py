@@ -31,8 +31,8 @@ def train(
         data_path: str = "yahma/alpaca-cleaned",
         output_dir: str = "./lora-alpaca",
         adapter_name: str = "lora",
-        #cooperative_modules: str = "lora_A, lora_B",
-        expert_locations: str = "lora_A, lora_B",
+        lora_cooperative_at: str = "lora_A, lora_B",
+        cooperative_targets: List[str] = None,
         sample_period: int = 1,
         var_loss_scale: float = 5e-3,
         use_averaging: bool = False,
@@ -97,7 +97,7 @@ def train(
         f"lora_alpha: {lora_alpha}\n"
         f"lora_dropout: {lora_dropout}\n"
         f"lora_target_modules: {lora_target_modules}\n"
-        f"expert_locations: {expert_locations}\n"
+        f"lora_cooperative_at: {lora_cooperative_at}\n"
         f"posthoc_app: {posthoc_app}\n"
         f"number of experts: {num_experts}\n"
         f"use entropy loss: {use_entropy}\n"
@@ -116,6 +116,7 @@ def train(
         f"wandb_watch: {wandb_watch}\n"
         f"wandb_log_model: {wandb_log_model}\n"
         f"resume_from_checkpoint: {resume_from_checkpoint}\n"
+        f"cooperative_targets: {cooperative_targets}\n"
 
     )
 
@@ -221,13 +222,14 @@ def train(
             r=lora_r,
             lora_alpha=lora_alpha,
             target_modules=target_modules,
+            cooperative_targets = cooperative_targets,
             lora_dropout=lora_dropout,
             bias="none",
             task_type="CAUSAL_LM",
-            #cooperative_modules=cooperative_modules,
+            #lora_cooperative_at=lora_cooperative_at,
             #num_experts=num_experts,
             #use_entropy=use_entropy,
-            cooperative_modules=expert_locations,
+            lora_cooperative_at=lora_cooperative_at,
             num_experts=num_experts,
             sample_period=sample_period,
             var_loss_scale = var_loss_scale,
@@ -361,7 +363,7 @@ def train(
         for module in list(dict(model.named_modules()).values()):
             if type(module).__name__ == 'CooperativeLinear' or type(module).__name__ == 'CooperativeConv1D':
                 module.train_cooperative = True
-                module.initialize_prior_fine()
+                # module.initialize_prior_fine()
         if learning_rate_coop == -1:
                 learning_rate *= 5
         else:

@@ -84,8 +84,8 @@ class LoraConfig(PeftConfig):
             "the final layer `classifier/score` are randomly initialized and as such need to be trainable and saved."
         },
     )
-    cooperative_modules: str = field(default="lora_A, lora_B", metadata={"help": "LoRA modules to apply cooperative"})
-    expert_locations: str = field(default = 'q,k,v,ao,i,o',metadata={"help": "Transformer layers to apply cooperative"})
+    lora_cooperative_at: str = field(default="lora_A, lora_B", metadata={"help": "LoRA modules to apply cooperative"})
+    cooperative_targets: str = field(default = 'query',metadata={"help": "Transformer layers to apply cooperative"})
     num_experts: int = field(default=8, metadata={"help": "Number of Experts"})
     var_loss_scale: float = field(default= 5e-3 , metadata={"help": "To scale down the magnitude of vvariational loss"})
     use_entropy: bool = field(default=False, metadata={"help": "True if entropy loss is needed to enforce cooperation"})
@@ -128,7 +128,7 @@ class LoraModel(torch.nn.Module):
         self._find_and_replace()
         mark_only_lora_as_trainable(self.model, self.peft_config.bias)
         self.forward = self.model.forward
-        #self.cooperative_modules = config.cooperative_modules
+        #self.lora_cooperative_at = config.lora_cooperative_at
         #self.num_experts = config.num_experts
         #self.use_entropy = config.use_entropy
     
@@ -155,6 +155,11 @@ class LoraModel(torch.nn.Module):
                 target_module_found = re.fullmatch(self.peft_config.target_modules, key)
             else:
                 target_module_found = any(key.endswith(target_key) for target_key in self.peft_config.target_modules)
+
+            if isinstance(self.peft_config.cooperative_targets, str):
+                cooperative_target_module_found = re.fullmatch(self.peft_config.target_modules, key)
+            else:
+                cooperative_target_module_found = any(key.endswith(target_key) for target_key in self.peft_config.cooperative_targets)
             if target_module_found:
                 if not is_target_modules_in_base_model:
                     is_target_modules_in_base_model = True
@@ -175,7 +180,7 @@ class LoraModel(torch.nn.Module):
                     )
                     if self.peft_config.enable_lora is None:
                         new_module = Linear8bitLt(target.in_features, target.out_features, bias=bias, \
-                                                  cooperative_modules=self.peft_config.cooperative_modules, num_experts=self.peft_config.num_experts, \
+                                                  lora_cooperative_at=self.peft_config.lora_cooperative_at, num_experts=self.peft_config.num_experts, \
                                         use_entropy=self.peft_config.use_entropy, var_loss_scale = self.peft_config.var_loss_scale, \
                                         use_averaging = self.peft_config.use_averaging,
                                         **kwargs)
@@ -184,7 +189,8 @@ class LoraModel(torch.nn.Module):
                         new_module = MergedLinear8bitLt(target.in_features, target.out_features, bias=bias, **kwargs)
                 elif isinstance(target, torch.nn.Linear) and self.peft_config.enable_lora is None:
                     new_module = Linear(target.in_features, target.out_features, bias=bias, \
-                                        cooperative_modules=self.peft_config.cooperative_modules, num_experts=self.peft_config.num_experts, \
+                                        layer_is_cooperative = True if cooperative_target_module_found else False, \
+                                        lora_cooperative_at=self.peft_config.lora_cooperative_at, num_experts=self.peft_config.num_experts, \
                                         use_entropy=self.peft_config.use_entropy, var_loss_scale = self.peft_config.var_loss_scale, \
                                         use_averaging = self.peft_config.use_averaging,
                                         **kwargs)
@@ -320,7 +326,7 @@ class Linear(nn.Linear, LoraLayer):
         lora_dropout: float = 0.0,
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         merge_weights: bool = False,
-        cooperative_modules: str = '',
+        lora_cooperative_at: str = '',
         num_experts: int = 4,
         use_entropy: bool = True,
         var_loss_scale = 5e-3,
@@ -328,13 +334,14 @@ class Linear(nn.Linear, LoraLayer):
         use_averaging: bool = True,
         kl_loss_weight: float = 5e-3,
         train_cooperative: bool = True,
+        layer_is_cooperative: bool = True,
         **kwargs,
     ):
         nn.Linear.__init__(self, in_features, out_features, **kwargs)
         LoraLayer.__init__(self, r=r, lora_alpha=lora_alpha, lora_dropout=lora_dropout, merge_weights=merge_weights)
 
         self.fan_in_fan_out = fan_in_fan_out
-        self.cooperative_modules = cooperative_modules
+        self.lora_cooperative_at = lora_cooperative_at
         self.num_experts = num_experts
         self.use_entropy = use_entropy
         self.var_loss_scale = var_loss_scale
@@ -344,14 +351,14 @@ class Linear(nn.Linear, LoraLayer):
         self.train_cooperative = train_cooperative
         # Actual trainable parameters
         if r > 0:
-            if 'lora_A' in self.cooperative_modules:
+            if 'lora_A' in self.lora_cooperative_at and layer_is_cooperative:
                 self.lora_A = CooperativeLinear(in_features, r, bias=False, num_experts=num_experts, use_entropy=use_entropy,
                                                 use_averaging=use_averaging, sample_period = sample_period, var_loss_scale=var_loss_scale, \
                                                 kl_loss_weight=kl_loss_weight, train_cooperative=train_cooperative)
             else:
                 self.lora_A = nn.Linear(in_features, r, bias=False)
 
-            if 'lora_B' in self.cooperative_modules:
+            if 'lora_B' in self.lora_cooperative_at and layer_is_cooperative:
                 self.lora_B = CooperativeLinear(r, out_features, bias=False, num_experts=num_experts, use_entropy=use_entropy,
                                                 use_averaging=use_averaging, sample_period = sample_period, var_loss_scale=var_loss_scale, \
                                                 kl_loss_weight=kl_loss_weight, train_cooperative=train_cooperative)
@@ -561,7 +568,7 @@ if is_bnb_available():
             r: int = 0,
             lora_alpha: int = 1,
             lora_dropout: float = 0.0,
-            cooperative_modules: str = 'lora_A, lora_B',
+            lora_cooperative_at: str = 'lora_A, lora_B',
             num_experts: int = 4,
             use_entropy: bool = True,
             var_loss_scale = 5e-3,
@@ -571,7 +578,7 @@ if is_bnb_available():
             train_cooperative: bool = True,
             **kwargs,
         ):
-            self.cooperative_modules = cooperative_modules
+            self.lora_cooperative_at = lora_cooperative_at
             bnb.nn.Linear8bitLt.__init__(
                 self,
                 in_features,
@@ -587,14 +594,14 @@ if is_bnb_available():
             if r > 0:
                 #self.lora_A = nn.Linear(in_features, r, bias=False)
                 #self.lora_B = nn.Linear(r, out_features, bias=False)
-                if 'lora_A' in self.cooperative_modules:
+                if 'lora_A' in self.lora_cooperative_at:
                     self.lora_A = CooperativeLinear(in_features, r, bias=False, num_experts=num_experts, use_entropy=use_entropy,
                                                     use_averaging=use_averaging, sample_period = sample_period, var_loss_scale=var_loss_scale, \
                                                     kl_loss_weight=kl_loss_weight, train_cooperative=train_cooperative)
                 else:
                     self.lora_A = nn.Linear(in_features, r, bias=False)
 
-                if 'lora_B' in self.cooperative_modules:
+                if 'lora_B' in self.lora_cooperative_at:
                     self.lora_B = CooperativeLinear(r, out_features, bias=False, num_experts=num_experts, use_entropy=use_entropy,
                                                     use_averaging=use_averaging, sample_period = sample_period, var_loss_scale=var_loss_scale, \
                                                     kl_loss_weight=kl_loss_weight, train_cooperative=train_cooperative)
