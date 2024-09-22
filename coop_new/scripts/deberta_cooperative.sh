@@ -16,9 +16,9 @@ task="${tasks[$i]}"
 eval_steps="${eval_st[$i]}"
 bs="${batch[$i]}"
 lr="${learn_rate[$i]}"
-TF_CPP_MIN_LOG_LEVEL=2 TF_ENABLE_ONEDNN_OPTS=0 WANDB_PROJECT='Deberta-Cooperative-PostHoc' CUDA_VISIBLE_DEVICES=0 python /home/arinjay/fix/cooperative_new/coop_new/examples/text-classification/run_glue.py \
+TF_CPP_MIN_LOG_LEVEL=2 TF_ENABLE_ONEDNN_OPTS=0 WANDB_PROJECT='Deberta-Cooperative-Test' CUDA_VISIBLE_DEVICES=0 python ../examples/text-classification/run_glue.py \
 --model_name_or_path microsoft/deberta-v3-base \
---expert_locations 'query' \
+--cooperative_targets 'query' \
 --num_experts ${num_experts} \
 --var_loss_scale ${vls} \
 --use_entropy \
@@ -36,6 +36,6 @@ TF_CPP_MIN_LOG_LEVEL=2 TF_ENABLE_ONEDNN_OPTS=0 WANDB_PROJECT='Deberta-Cooperativ
 --logging_steps 10 \
 --report_to wandb \
 --seed 6  \
---output_dir ../outputs/deberta/${task}/query/posthoc/${num_epochs}/${num_coop_epochs}/${vls}/${lr}/${num_experts} \
+--output_dir ../outputs/deberta/${task}/query/${num_epochs}/${num_coop_epochs}/${vls}/${lr}/${num_experts} \
 --overwrite_output_dir
 done
