@@ -235,7 +235,7 @@ class ModelArguments:
             "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' "
         },
     )
-    cooperative_targets: str = field(default = 'query',metadata={"help": "Transformer layers to apply cooperative"})
+    cooperative_targets: str = field(default = '',metadata={"help": "Transformer layers to apply cooperative"})
 
     posthoc_app: Optional[int] = field(
         default=0,
@@ -470,7 +470,7 @@ def main():
             cache_dir=model_args.cache_dir,
             revision=model_args.model_revision,
             use_auth_token=True if model_args.use_auth_token else None,
-            expert_locations=model_args.expert_locations,
+            expert_locations=model_args.cooperative_targets,
             num_experts=model_args.num_experts,
             sample_period=model_args.sample_period,
             var_loss_scale = model_args.var_loss_scale,
