@@ -182,7 +182,7 @@ class LoraModel(torch.nn.Module):
                         new_module = Linear8bitLt(target.in_features, target.out_features, bias=bias, \
                                                   lora_cooperative_at=self.peft_config.lora_cooperative_at, num_experts=self.peft_config.num_experts, \
                                         use_entropy=self.peft_config.use_entropy, var_loss_scale = self.peft_config.var_loss_scale, \
-                                        use_averaging = self.peft_config.use_averaging,
+                                        use_averaging = self.peft_config.use_averaging, layer_name = key,
                                         **kwargs)
                     else:
                         kwargs.update({"enable_lora": self.peft_config.enable_lora})
@@ -192,7 +192,7 @@ class LoraModel(torch.nn.Module):
                                         layer_is_cooperative = True if cooperative_target_module_found else False, \
                                         lora_cooperative_at=self.peft_config.lora_cooperative_at, num_experts=self.peft_config.num_experts, \
                                         use_entropy=self.peft_config.use_entropy, var_loss_scale = self.peft_config.var_loss_scale, \
-                                        use_averaging = self.peft_config.use_averaging,
+                                        use_averaging = self.peft_config.use_averaging, layer_name = key,
                                         **kwargs)
                 elif self.peft_config.enable_lora is not None:
                     kwargs.update({"enable_lora": self.peft_config.enable_lora})
@@ -333,8 +333,9 @@ class Linear(nn.Linear, LoraLayer):
         sample_period = 1,
         use_averaging: bool = True,
         kl_loss_weight: float = 5e-3,
-        train_cooperative: bool = True,
-        layer_is_cooperative: bool = True,
+        train_cooperative: bool = False,
+        layer_is_cooperative: bool = False,
+        layer_name = "",
         **kwargs,
     ):
         nn.Linear.__init__(self, in_features, out_features, **kwargs)
@@ -349,6 +350,8 @@ class Linear(nn.Linear, LoraLayer):
         self.sample_period = sample_period
         self.kl_loss_weight = kl_loss_weight
         self.train_cooperative = train_cooperative
+        self.layer_name = layer_name
+        
         # Actual trainable parameters
         if r > 0:
             if 'lora_A' in self.lora_cooperative_at and layer_is_cooperative:
@@ -405,8 +408,9 @@ class Linear(nn.Linear, LoraLayer):
     def forward(self, x: torch.Tensor):
         previous_dtype = self.weight.dtype
 
-        if x.isnan().any():
-            print("NAN")
+        assert(
+            not x.isnan().any()
+            ), f"{self.layer_name}: input x is nan"
         if self.disable_adapters:
             if self.r > 0 and self.merged:
                 matmul_output = self.lora_B.weight @ self.lora_A.weight
@@ -418,14 +422,17 @@ class Linear(nn.Linear, LoraLayer):
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
             if self.r > 0:
                 lora_dropout_res = self.lora_dropout(x.to(self.lora_A.weight.dtype))
+                assert(
+                    not lora_dropout_res.isnan().any()
+                    ), f"{self.layer_name}: lora_dropout_res is nan"
                 lora_A_res = self.lora_A(lora_dropout_res)
-                if lora_A_res.isnan().any():
-                    print("lora_A gave NaNs")
-                    print(lora_A_res)
+                assert(
+                    not lora_A_res.isnan().any()
+                    ), f"{self.layer_name}: lora_A_res is nan"
                 lora_B_res = self.lora_B(lora_A_res)
-                if lora_B_res.isnan().any():
-                    print("lora_B gave NaNs")
-                    print(lora_B_res)
+                assert(
+                    not lora_B_res.isnan().any()
+                    ), f"{self.layer_name}: lora_B_res is nan"
                 result += lora_B_res * self.scaling
         else:
              result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
