@@ -27,7 +27,7 @@ import json
 import torch
 import torch.nn as nn
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import List, Optional, Union
 import evaluate
 import numpy as np
 from datasets import load_dataset, load_metric
@@ -219,6 +219,23 @@ class ModelArguments:
         default="query,key,value,attention_out,intermediate,output",
         metadata={"help": "The modules applying cooperative"},
     )
+
+    lora_cooperative_at: Optional[Union[List[str], str]] = field(
+        default=None,
+        metadata={
+            "help": "List of module names or regex expression of the module names to replace with Lora."
+            "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' "
+        },
+    )
+
+    target_modules: Optional[Union[List[str], str]] = field(
+        default=None,
+        metadata={
+            "help": "List of module names or regex expression of the module names to replace with Lora."
+            "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' "
+        },
+    )
+    cooperative_targets: str = field(default = 'query',metadata={"help": "Transformer layers to apply cooperative"})
 
     posthoc_app: Optional[int] = field(
         default=0,
@@ -503,15 +520,18 @@ def main():
 
     trainable_params = []
 
+    print(model_args.target_modules)
+    print(model_args.cooperative_targets)
+    print(model_args.lora_cooperative_at)
     if model_args.apply_lora:
         config = LoraConfig(
             r=model_args.lora_r,
             lora_alpha=model_args.lora_alpha,
-            target_modules=['query_proj', 'key_proj', 'value_proj',\
-                            'attention.output.dense','intermediate.dense','output.dense'],
+            target_modules=(model_args.target_modules).split(','),
+            lora_cooperative_at = model_args.lora_cooperative_at,
+            cooperative_targets = (model_args.cooperative_targets).split(','),
             bias="none",
             task_type="TOKEN_CLS",
-            cooperative_modules=model_args.expert_locations,
             num_experts=model_args.num_experts,
             sample_period=model_args.sample_period,
             var_loss_scale = model_args.var_loss_scale,
