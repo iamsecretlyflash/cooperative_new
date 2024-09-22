@@ -19,7 +19,9 @@ eval_steps="${eval_st[$i]}"
 bs="${batch[$i]}"
 TF_CPP_MIN_LOG_LEVEL=2 TF_ENABLE_ONEDNN_OPTS=1 WANDB_PROJECT='Deberta-Cooperative-PostHoc' CUDA_VISIBLE_DEVICES=2 python /home/arinjay/fix/cooperative_new/coop_new/examples/text-classification/run_glue.py  \
 --model_name_or_path microsoft/deberta-v3-base \
---expert_locations 'lora_A' \
+--target_modules '['query_proj', 'key_proj', 'value_proj','attention.output.dense','intermediate.dense','output.dense']' \
+--lora_cooperative_at 'lora_A' \
+--cooperative_targets '['query_proj', 'key_proj', 'value_proj']' \
 --num_experts ${num_experts} \
 --var_loss_scale ${vls} \
 --use_entropy \
